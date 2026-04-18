@@ -55,3 +55,7 @@ profile.json.gz
 # Codex
 .codex/*
 !.codex/hooks.json
+
+# Local environment / secrets
+.env
+.env.local
