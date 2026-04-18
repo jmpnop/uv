@@ -1157,11 +1157,23 @@ impl ManagedPythonDownloadList {
             // with `[[python-indexes]]` configured shouldn't be blocked from commands that don't
             // actually need downloads (e.g. `uv run` against an already-installed interpreter).
             // The built-in list is embedded and always available; file-backed sources are local.
+            //
+            // Warn visibly rather than logging at debug: if the user invoked an install/pin/find
+            // that actually needs the skipped entries, they'll see a "no matching Python" error
+            // downstream, and the warning gives them the link between "my index vanished" and
+            // "I'm offline". `warn_user_once!` dedupes per process so `uv sync` / `uv run` flows
+            // that call `new()` twice don't double-warn.
             if matches!(source.location, PythonDownloadLocation::Http(_))
                 && matches!(client.connectivity(), uv_client::Connectivity::Offline)
             {
                 if let Some(index_name) = source.index_name.as_deref() {
-                    debug!("Skipping Python index `{index_name}` in offline mode");
+                    warn_user_once!(
+                        "Python index `{index_name}` is not available in offline mode; skipping"
+                    );
+                } else {
+                    warn_user_once!(
+                        "Python downloads JSON URL is not available in offline mode; skipping"
+                    );
                 }
                 continue;
             }

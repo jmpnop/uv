@@ -1765,6 +1765,42 @@ fn python_list_python_indexes_insecure_http() -> Result<()> {
     Ok(())
 }
 
+/// In `--offline` mode, remote `[[python-indexes]]` are skipped with a visible warning so the
+/// user sees the link between "my index vanished" and "I'm offline". Built-in downloads remain
+/// available, and the command succeeds (rather than hard-failing on a fetch the user can't
+/// complete anyway).
+#[test]
+fn python_list_python_indexes_offline() -> Result<()> {
+    let context = uv_test::test_context_with_versions!(&[]);
+
+    // Use an `https://` URL so the insecure-scheme check doesn't fire and an unreachable
+    // hostname so the test doesn't depend on a real network — we're verifying the fetch is
+    // skipped entirely.
+    let config = context.temp_dir.child("uv.toml");
+    config.write_str(indoc::indoc! {r#"
+        [[python-indexes]]
+        name = "unreachable"
+        url = "https://unreachable.invalid/versions.json"
+    "#})?;
+
+    uv_snapshot!(context.filters(), context
+        .python_list()
+        .env_remove(EnvVars::UV_PYTHON_DOWNLOADS)
+        .arg("--offline")
+        .arg("--only-downloads")
+        .arg("cpython-3.12"), @"
+    success: true
+    exit_code: 0
+    ----- stdout -----
+    cpython-3.12.13-macos-x86_64-none    <download available>
+
+    ----- stderr -----
+    warning: Python index `unreachable` is not available in offline mode; skipping
+    ");
+
+    Ok(())
+}
+
 #[test]
 fn python_list_with_mirrors() {
     let context = uv_test::test_context_with_versions!(&[])
