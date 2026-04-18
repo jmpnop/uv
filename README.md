@@ -9,6 +9,30 @@
 
 An extremely fast Python package and project manager, written in Rust.
 
+## Installation
+
+macOS and Linux:
+
+```bash
+curl -LsSf https://github.com/jmpnop/uv/releases/latest/download/uv-installer.sh | sh
+```
+
+Windows:
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://github.com/jmpnop/uv/releases/latest/download/uv-installer.ps1 | iex"
+```
+
+Prebuilt binaries for Linux (x86_64, aarch64), macOS (Intel, Apple Silicon), and Windows (x86_64)
+are published on every tag. To pin to a specific version:
+
+```bash
+UV_VERSION=v0.11.7-fork.1 curl -LsSf https://github.com/jmpnop/uv/releases/download/v0.11.7-fork.1/uv-installer.sh | sh
+```
+
+Uninstall by removing the binary (default location `~/.local/bin/uv`). Clean up uv's managed state
+with `uv cache clean && rm -rf "$(uv python dir)" "$(uv tool dir)"`.
+
 <p align="center">
   <picture align="center">
     <source media="(prefers-color-scheme: dark)" srcset="https://github.com/astral-sh/uv/assets/1309177/03aa9163-1c79-4a87-a31d-7a9311ed9310">
@@ -197,122 +221,6 @@ Identical to `python-build-standalone`'s `download-metadata.json`. Example entry
   `default = true`. Kept for backwards compatibility.
 
 ---
-
-## Installation
-
-This fork ships **source only** — the extra features (e.g. `[[python-indexes]]`) are compiled into
-the `uv` binary you build locally. If you don't need the fork's extras, install upstream uv from
-[docs.astral.sh/uv/getting-started/installation](https://docs.astral.sh/uv/getting-started/installation/)
-instead — it's prebuilt and downloads in seconds.
-
-All build methods below require a Rust toolchain. If you don't have one:
-
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-```
-
-### `cargo install` from the fork
-
-The one-liner. Recommended if you don't want a working clone:
-
-```bash
-cargo install --git https://github.com/jmpnop/uv --locked uv
-```
-
-The binary lands at `~/.cargo/bin/uv`. Make sure `~/.cargo/bin` is on your `PATH`.
-
-Pin to a specific commit for reproducibility:
-
-```bash
-cargo install --git https://github.com/jmpnop/uv --rev <sha> --locked uv
-```
-
-### Build from a local clone
-
-Best if you want to modify the source or run the test suite:
-
-```bash
-git clone https://github.com/jmpnop/uv
-cd uv
-cargo install --locked --path crates/uv
-```
-
-### Release build without `cargo install`
-
-Produces a release-optimized binary at `target/release/uv` without publishing it to `~/.cargo/bin`:
-
-```bash
-cargo build --release --locked -p uv
-./target/release/uv --version
-```
-
-Copy the binary wherever you want it on your `PATH`.
-
-### Docker / CI
-
-Build once in a multi-stage image, copy the static-linked binary into your runtime stage:
-
-```dockerfile
-FROM rust:1-bookworm AS builder
-WORKDIR /src
-RUN git clone https://github.com/jmpnop/uv . \
-    && cargo build --release --locked -p uv
-
-FROM debian:bookworm-slim
-COPY --from=builder /src/target/release/uv /usr/local/bin/uv
-ENTRYPOINT ["uv"]
-```
-
-### Upgrading
-
-`uv self update` is **disabled** in source-built installs — the self-updater looks for signed
-release artifacts that this fork doesn't publish. To upgrade, re-run your install command with
-`--force`:
-
-```bash
-cargo install --git https://github.com/jmpnop/uv --locked --force uv
-```
-
-Or, from a clone: `git pull && cargo install --locked --force --path crates/uv`.
-
-### Shell autocompletion
-
-For `uv`:
-
-| Shell             | Command                                                                                                              |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------- |
-| Bash              | `echo 'eval "$(uv generate-shell-completion bash)"' >> ~/.bashrc`                                                    |
-| Zsh               | `echo 'eval "$(uv generate-shell-completion zsh)"' >> ~/.zshrc`                                                      |
-| fish              | `echo 'uv generate-shell-completion fish \| source' > ~/.config/fish/completions/uv.fish`                            |
-| Elvish            | `echo 'eval (uv generate-shell-completion elvish \| slurp)' >> ~/.elvish/rc.elv`                                     |
-| PowerShell / pwsh | `Add-Content -Path $PROFILE -Value '(& uv generate-shell-completion powershell) \| Out-String \| Invoke-Expression'` |
-
-For `uvx`, substitute `uvx --generate-shell-completion <shell>` for the
-`uv generate-shell-completion <shell>` form above.
-
-### Uninstallation
-
-Remove the installed binary:
-
-```bash
-# If installed via `cargo install`:
-cargo uninstall uv
-
-# Otherwise, delete the binary from wherever you placed it.
-rm -f ~/.cargo/bin/uv  # or your chosen location
-```
-
-Clean up uv's managed state (optional — wipes the cache, installed Pythons, and installed tools):
-
-```bash
-uv cache clean
-rm -rf "$(uv python dir)"
-rm -rf "$(uv tool dir)"
-```
-
-See the upstream
-[installation documentation](https://docs.astral.sh/uv/getting-started/installation/) for how to
-install prebuilt upstream uv via Homebrew, WinGet, PyPI, or the standalone installer.
 
 ## Documentation
 
