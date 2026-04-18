@@ -525,6 +525,11 @@ default = true
 
 At most one index may set `default = true`.
 
+Each entry's `name` is used for diagnostics — e.g. errors mention the failing index by name. Names
+starting with `$` are reserved for uv-synthesized entries (the `UV_PYTHON_INDEX` environment
+variable becomes `$env`; each `--python-index` CLI flag becomes `$cli-0`, `$cli-1`, etc.) and are
+rejected in user config.
+
 ### CLI and environment overrides
 
 Pass `--python-index <URL>` to `uv python list`, `uv python find`, `uv python install`,
@@ -575,9 +580,13 @@ An index is a JSON object mapping installation keys to metadata, identical to th
 }
 ```
 
-Every entry **must** include a valid 64-character hex `sha256` — custom indexes cannot ship
-unverified binaries. The JSON itself must be served over HTTPS (loopback addresses are permitted for
-local testing).
+Every custom entry **must** include a valid 64-character hex `sha256` — custom indexes cannot ship
+unverified binaries. The built-in list is not subject to this check (its entries are embedded in the
+uv binary).
+
+The index JSON is served over HTTPS by default. A plain `http://` URL is rejected unless the host is
+a loopback address (`localhost`, `127.0.0.0/8`, or `::1`), in which case uv emits a one-shot warning
+for local-testing scenarios. HTTPS to any host — loopback or not — is always accepted.
 
 ### Related options
 

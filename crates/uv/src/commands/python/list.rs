@@ -83,13 +83,24 @@ pub(crate) async fn list(
         PythonDownloadRequest::from_request(request.as_ref().unwrap_or(&PythonRequest::Any))
     };
 
+    // Only load the download list (which can fetch a remote `[[python-indexes]]` JSON) when the
+    // command will actually consult it. Queries like `--only-system`, `--only-installed`, and
+    // non-automatic downloads don't need it, and skipping the fetch avoids an unnecessary network
+    // hit — plus a hard failure when the user configures a custom index but runs offline.
+    let needs_download_list = base_download_request.is_some()
+        && !matches!(kinds, PythonListKinds::Installed)
+        && (matches!(kinds, PythonListKinds::Downloads) || python_downloads.is_automatic());
     let client = client_builder.build()?;
-    let download_list = ManagedPythonDownloadList::new(
-        &client,
-        python_downloads_json_url.as_deref(),
-        python_indexes.as_deref(),
-    )
-    .await?;
+    let download_list = if needs_download_list {
+        ManagedPythonDownloadList::new(
+            &client,
+            python_downloads_json_url.as_deref(),
+            python_indexes.as_deref(),
+        )
+        .await?
+    } else {
+        ManagedPythonDownloadList::new_only_embedded()?
+    };
     let mut output = BTreeSet::new();
     if let Some(base_download_request) = base_download_request {
         let download_request = match kinds {

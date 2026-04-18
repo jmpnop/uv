@@ -1153,6 +1153,19 @@ impl ManagedPythonDownloadList {
         let mut merged: IndexMap<PythonInstallationKey, ManagedPythonDownload> = IndexMap::new();
 
         for source in sources {
+            // In offline mode, skip any HTTP source — fetching would error anyway, and a user
+            // with `[[python-indexes]]` configured shouldn't be blocked from commands that don't
+            // actually need downloads (e.g. `uv run` against an already-installed interpreter).
+            // The built-in list is embedded and always available; file-backed sources are local.
+            if matches!(source.location, PythonDownloadLocation::Http(_))
+                && matches!(client.connectivity(), uv_client::Connectivity::Offline)
+            {
+                if let Some(index_name) = source.index_name.as_deref() {
+                    debug!("Skipping Python index `{index_name}` in offline mode");
+                }
+                continue;
+            }
+
             if let PythonDownloadLocation::Http(url) = &source.location
                 && url.scheme() == "http"
                 && let Some(index_name) = source.index_name.as_deref()
@@ -1341,10 +1354,20 @@ fn validate_custom_index_hash(
             key: entry.key.to_string(),
         }),
         Some(sha256) if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            // Cap the echoed value so a pathological multi-megabyte `sha256` field doesn't spam
+            // the terminal — 80 chars is enough to show the user their typo without swamping.
+            const MAX_DISPLAY: usize = 80;
+            let value = if sha256.len() > MAX_DISPLAY {
+                let mut truncated: String = sha256.chars().take(MAX_DISPLAY).collect();
+                truncated.push_str("...");
+                truncated
+            } else {
+                sha256.to_owned()
+            };
             Err(Error::CustomIndexInvalidHash {
                 name: index_name.to_owned(),
                 key: entry.key.to_string(),
-                value: sha256.to_owned(),
+                value,
             })
         }
         Some(_) => Ok(()),
