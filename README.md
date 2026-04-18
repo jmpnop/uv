@@ -46,6 +46,10 @@ uv is backed by [Astral](https://astral.sh), the creators of
 
 ## Extra features in this fork
 
+<p align="center">
+  <img alt="Fork logo" src="assets/fork-logo.webp" width="640">
+</p>
+
 This repository is a fork of [`astral-sh/uv`](https://github.com/astral-sh/uv) with additional
 features layered on top. Everything from upstream continues to work unchanged — the sections below
 describe only what's been added here.
