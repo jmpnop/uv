@@ -87,9 +87,9 @@ uv python install 3.14 --python-index https://experimental.example.com/jit/versi
   configuration is an error — exactly one index may fully replace the built-in list.
 - **Per-file uniqueness.** Duplicate names within a single config file are errors; cross-file
   duplicates are resolved by higher-layer-wins.
-- **Offline respect.** In `--offline` mode, HTTP sources are skipped silently — a user with a remote
-  index configured isn't blocked from commands that don't actually need to download Python (e.g.
-  `uv run` against an already-installed interpreter).
+- **Offline respect.** In `--offline` mode, HTTP sources are skipped with a visible
+  `warn_user_once!` warning naming each skipped index — so `uv run` against an already-installed
+  interpreter still succeeds without the user being confused about why their index "vanished."
 - **`--only-system` / `--only-installed` skip fetching.** `uv python list --only-system` and
   `--only-installed` don't consult downloads, so the remote index isn't fetched in those modes.
 
@@ -103,9 +103,12 @@ Every error variant names the offending index (by `name`) so the user knows whic
 - `CustomIndexInvalidHash { name, key, value }` — `sha256` is the wrong length or non-hex.
 - `MultipleDefaultPythonIndexes(count, names)` — more than one `default = true`.
 - `DuplicatePythonIndexName(name)` — same name twice in one config file.
-- `ReservedPythonIndexName(name)` — user name starts with `$`.
-- `IndexUrlMissingHost` — HTTP(S) URL with no host.
 - `InvalidFileUrl(url)` — malformed `file://` URL.
+
+Names starting with `$` fail at TOML parse time via a serde `Error::custom` message rather than a
+dedicated enum variant — the TOML diagnostic points at the offending `[[python-indexes]]` block and
+reads: "Python index name `$x` uses the reserved `$` prefix; `$`-prefixed names are synthesized
+internally (e.g. for `UV_PYTHON_INDEX` or `--python-index`)."
 
 ### Index format
 
