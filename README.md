@@ -30,6 +30,16 @@ are published on every tag. To pin to a specific version:
 UV_VERSION=v0.11.7-fork.1 curl -LsSf https://github.com/jmpnop/uv/releases/download/v0.11.7-fork.1/uv-installer.sh | sh
 ```
 
+Update to the latest fork release in-place:
+
+```bash
+uv self update
+```
+
+`uv self update` on this fork queries **`github.com/jmpnop/uv/releases`** only — never astral's
+upstream. It's a direct replacement that downloads the installer from the latest release tag and
+re-runs it against the same directory the current `uv` binary is installed in.
+
 Uninstall by removing the binary (default location `~/.local/bin/uv`). Clean up uv's managed state
 with `uv cache clean && rm -rf "$(uv python dir)" "$(uv tool dir)"`.
 
