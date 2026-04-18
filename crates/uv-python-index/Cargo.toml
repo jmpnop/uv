@@ -1,0 +1,15 @@
+[package]
+name = "uv-python-index"
+version = "0.0.1"
+edition = { workspace = true }
+rust-version = { workspace = true }
+authors = { workspace = true }
+license = { workspace = true }
+
+[dependencies]
+serde = { workspace = true, features = ["derive"] }
+uv-redacted = { workspace = true }
+schemars = { workspace = true, optional = true }
+
+[features]
+schemars = ["dep:schemars", "uv-redacted/schemars"]

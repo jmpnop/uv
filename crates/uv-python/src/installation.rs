@@ -14,6 +14,7 @@ use uv_cache::Cache;
 use uv_client::{BaseClient, BaseClientBuilder};
 use uv_pep440::{Prerelease, Version};
 use uv_platform::{Arch, Libc, Os, Platform};
+use uv_python_index::PythonIndex;
 
 use crate::discovery::{
     EnvironmentPreference, PythonRequest, VersionRequest, find_best_python_installation,
@@ -143,6 +144,7 @@ impl PythonInstallation {
         python_install_mirror: Option<&str>,
         pypy_install_mirror: Option<&str>,
         python_downloads_json_url: Option<&str>,
+        python_indexes: Option<&[PythonIndex]>,
     ) -> Result<Self, Error> {
         let downloads_enabled = preference.allows_managed()
             && python_downloads.is_automatic()
@@ -158,6 +160,7 @@ impl PythonInstallation {
             python_install_mirror,
             pypy_install_mirror,
             python_downloads_json_url,
+            python_indexes,
         )
         .await?;
         installation
@@ -184,20 +187,22 @@ impl PythonInstallation {
         python_install_mirror: Option<&str>,
         pypy_install_mirror: Option<&str>,
         python_downloads_json_url: Option<&str>,
+        python_indexes: Option<&[PythonIndex]>,
     ) -> Result<Self, Error> {
         let request = request.unwrap_or(&PythonRequest::Default);
 
-        let err = match Self::find_existing(request, environments, preference, cache) {
-            Ok(installation) => {
-                installation
-                    .download_and_warn_if_outdated_prerelease(
-                        request,
-                        client_builder,
-                        python_downloads_json_url,
-                    )
-                    .await?;
-                return Ok(installation);
-            }
+        // Python downloads are performing their own retries to catch stream errors, disable the
+        // default retries to avoid the middleware performing uncontrolled retries.
+        let client = client_builder.clone().retries(0).build()?;
+        let download_list =
+            ManagedPythonDownloadList::new(&client, python_downloads_json_url, python_indexes)
+                .await?;
+
+        // Search for the installation. The download list (which honors any custom
+        // `[[python-indexes]]`) powers the outdated-prerelease warning, so we reuse it here rather
+        // than performing a second fetch via `download_and_warn_if_outdated_prerelease`.
+        let err = match Self::find(request, environments, preference, &download_list, cache) {
+            Ok(installation) => return Ok(installation),
             Err(err) => err,
         };
 
@@ -214,11 +219,6 @@ impl PythonInstallation {
         let Some(download_request) = PythonDownloadRequest::from_request(request) else {
             return Err(err);
         };
-
-        let download_list_client = client_builder.build()?;
-        let download_list =
-            ManagedPythonDownloadList::new(&download_list_client, python_downloads_json_url)
-                .await?;
 
         let downloads_enabled = preference.allows_managed()
             && python_downloads.is_automatic()
@@ -537,7 +537,7 @@ impl PythonInstallation {
 
         let download_list_client = client_builder.build()?;
         let download_list =
-            ManagedPythonDownloadList::new(&download_list_client, python_downloads_json_url)
+            ManagedPythonDownloadList::new(&download_list_client, python_downloads_json_url, None)
                 .await?;
         self.warn_if_outdated_prerelease(request, &download_list);
 

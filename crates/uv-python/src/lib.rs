@@ -768,6 +768,7 @@ mod tests {
                     None,
                     None,
                     missing_downloads.path().to_str(),
+                    None,
                 ))
         })?;
 
@@ -1398,6 +1399,7 @@ mod tests {
                 false,
                 &client_builder,
                 cache,
+                None,
                 None,
                 None,
                 None,

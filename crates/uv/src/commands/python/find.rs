@@ -4,9 +4,10 @@ use std::path::Path;
 
 use uv_cache::Cache;
 use uv_client::BaseClientBuilder;
-use uv_configuration::DependencyGroupsWithDefaults;
+use uv_configuration::{DependencyGroupsWithDefaults, PythonIndex};
 use uv_errors::ErrorWithHints;
 use uv_fs::Simplified;
+use uv_python::downloads::ManagedPythonDownloadList;
 use uv_python::{
     EnvironmentPreference, PythonDownloads, PythonInstallation, PythonPreference, PythonRequest,
 };
@@ -33,6 +34,7 @@ pub(crate) async fn find(
     system: bool,
     python_preference: PythonPreference,
     python_downloads_json_url: Option<&str>,
+    python_indexes: Option<&[PythonIndex]>,
     client_builder: &BaseClientBuilder<'_>,
     cache: &Cache,
     workspace_cache: &WorkspaceCache,
@@ -86,20 +88,19 @@ pub(crate) async fn find(
     )
     .await?;
 
-    let python_request = python_request.unwrap_or_default();
-    let python = PythonInstallation::find_existing(
-        &python_request,
+    let client = client_builder.clone().retries(0).build()?;
+    let download_list =
+        ManagedPythonDownloadList::new(&client, python_downloads_json_url, python_indexes).await?;
+
+    // `find` warns about an outdated prerelease using the download list, which honors any custom
+    // `[[python-indexes]]`, so no separate `download_and_warn_if_outdated_prerelease` fetch is needed.
+    let python = PythonInstallation::find(
+        &python_request.unwrap_or_default(),
         environment_preference,
         python_preference,
+        &download_list,
         cache,
     )?;
-    python
-        .download_and_warn_if_outdated_prerelease(
-            &python_request,
-            client_builder,
-            python_downloads_json_url,
-        )
-        .await?;
 
     // Warn if the discovered Python version is incompatible with the current workspace
     if let Some(requires_python) = requires_python {

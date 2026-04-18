@@ -19,6 +19,7 @@ use uv_pep440::{
     LowerBound, Prerelease, UpperBound, Version, VersionSpecifier, VersionSpecifiers,
     release_specifiers_to_ranges,
 };
+use uv_python_index::PythonIndex;
 use uv_static::EnvVars;
 use uv_warnings::{warn_user_once, write_warning_chain};
 use which::{which, which_all};
@@ -1441,6 +1442,7 @@ pub(crate) async fn find_best_python_installation(
     python_install_mirror: Option<&str>,
     pypy_install_mirror: Option<&str>,
     python_downloads_json_url: Option<&str>,
+    python_indexes: Option<&[PythonIndex]>,
 ) -> Result<PythonInstallation, crate::Error> {
     debug!("Starting Python discovery for {request}");
     let original_request = request;
@@ -1500,6 +1502,7 @@ pub(crate) async fn find_best_python_installation(
                     let download_list = ManagedPythonDownloadList::new(
                         &download_list_client,
                         python_downloads_json_url,
+                        python_indexes,
                     )
                     .await?;
                     let retry_policy = client_builder.retry_policy();

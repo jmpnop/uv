@@ -10,6 +10,7 @@ use owo_colors::OwoColorize;
 use rustc_hash::FxHashSet;
 use uv_cache::Cache;
 use uv_client::BaseClientBuilder;
+use uv_configuration::PythonIndex;
 use uv_fs::Simplified;
 use uv_python::downloads::{
     Error as PythonDownloadError, ManagedPythonDownloadList, PythonDownloadRequest,
@@ -63,6 +64,7 @@ pub(crate) async fn list(
     show_urls: bool,
     output_format: PythonListFormat,
     python_downloads_json_url: Option<String>,
+    python_indexes: Option<Vec<PythonIndex>>,
     python_install_mirror: Option<String>,
     pypy_install_mirror: Option<String>,
     python_preference: PythonPreference,
@@ -80,8 +82,12 @@ pub(crate) async fn list(
     };
 
     let client = client_builder.build()?;
-    let download_list =
-        ManagedPythonDownloadList::new(&client, python_downloads_json_url.as_deref()).await?;
+    let download_list = ManagedPythonDownloadList::new(
+        &client,
+        python_downloads_json_url.as_deref(),
+        python_indexes.as_deref(),
+    )
+    .await?;
     let mut output = BTreeSet::new();
     if let Some(base_download_request) = base_download_request {
         let download_request = match kinds {

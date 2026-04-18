@@ -103,6 +103,7 @@ pub(crate) async fn pin(
                     ManagedPythonDownloadList::new(
                         &download_list_client,
                         install_mirrors.python_downloads_json_url.as_deref(),
+                        install_mirrors.python_indexes.as_deref(),
                     )
                     .await?,
                 )
@@ -147,6 +148,7 @@ pub(crate) async fn pin(
         install_mirrors.python_install_mirror.as_deref(),
         install_mirrors.pypy_install_mirror.as_deref(),
         install_mirrors.python_downloads_json_url.as_deref(),
+        install_mirrors.python_indexes.as_deref(),
     )
     .await
     {
