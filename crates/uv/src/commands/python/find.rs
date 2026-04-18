@@ -5,6 +5,7 @@ use std::path::Path;
 use uv_cache::Cache;
 use uv_client::BaseClientBuilder;
 use uv_configuration::DependencyGroupsWithDefaults;
+use uv_configuration::PythonIndex;
 use uv_fs::Simplified;
 use uv_preview::Preview;
 use uv_python::downloads::ManagedPythonDownloadList;
@@ -34,6 +35,7 @@ pub(crate) async fn find(
     system: bool,
     python_preference: PythonPreference,
     python_downloads_json_url: Option<&str>,
+    python_indexes: Option<&[PythonIndex]>,
     client_builder: &BaseClientBuilder<'_>,
     cache: &Cache,
     workspace_cache: &WorkspaceCache,
@@ -79,7 +81,8 @@ pub(crate) async fn find(
     .await?;
 
     let client = client_builder.clone().retries(0).build()?;
-    let download_list = ManagedPythonDownloadList::new(&client, python_downloads_json_url).await?;
+    let download_list =
+        ManagedPythonDownloadList::new(&client, python_downloads_json_url, python_indexes).await?;
 
     let python = PythonInstallation::find(
         &python_request.unwrap_or_default(),

@@ -14,6 +14,7 @@ use uv_client::{BaseClient, BaseClientBuilder};
 use uv_pep440::{Prerelease, Version};
 use uv_platform::{Arch, Libc, Os, Platform};
 use uv_preview::Preview;
+use uv_python_index::PythonIndex;
 
 use crate::discovery::{
     EnvironmentPreference, PythonRequest, find_best_python_installation, find_python_installation,
@@ -85,12 +86,14 @@ impl PythonInstallation {
         python_install_mirror: Option<&str>,
         pypy_install_mirror: Option<&str>,
         python_downloads_json_url: Option<&str>,
+        python_indexes: Option<&[PythonIndex]>,
         preview: Preview,
     ) -> Result<Self, Error> {
         let retry_policy = client_builder.retry_policy();
         let client = client_builder.clone().retries(0).build()?;
         let download_list =
-            ManagedPythonDownloadList::new(&client, python_downloads_json_url).await?;
+            ManagedPythonDownloadList::new(&client, python_downloads_json_url, python_indexes)
+                .await?;
         let downloads_enabled = preference.allows_managed()
             && python_downloads.is_automatic()
             && client_builder.connectivity.is_online();
@@ -127,6 +130,7 @@ impl PythonInstallation {
         python_install_mirror: Option<&str>,
         pypy_install_mirror: Option<&str>,
         python_downloads_json_url: Option<&str>,
+        python_indexes: Option<&[PythonIndex]>,
         preview: Preview,
     ) -> Result<Self, Error> {
         let request = request.unwrap_or(&PythonRequest::Default);
@@ -136,7 +140,8 @@ impl PythonInstallation {
         let retry_policy = client_builder.retry_policy();
         let client = client_builder.clone().retries(0).build()?;
         let download_list =
-            ManagedPythonDownloadList::new(&client, python_downloads_json_url).await?;
+            ManagedPythonDownloadList::new(&client, python_downloads_json_url, python_indexes)
+                .await?;
 
         // Search for the installation
         let err = match Self::find(

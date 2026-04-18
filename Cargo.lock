@@ -6282,6 +6282,7 @@ dependencies = [
  "uv-pep440",
  "uv-pep508",
  "uv-platform-tags",
+ "uv-python-index",
  "uv-redacted",
  "uv-static",
 ]
@@ -7002,6 +7003,7 @@ dependencies = [
  "uv-platform-tags",
  "uv-preview",
  "uv-pypi-types",
+ "uv-python-index",
  "uv-redacted",
  "uv-state",
  "uv-static",
@@ -7010,6 +7012,15 @@ dependencies = [
  "which",
  "windows",
  "windows-registry",
+]
+
+[[package]]
+name = "uv-python-index"
+version = "0.0.1"
+dependencies = [
+ "schemars",
+ "serde",
+ "uv-redacted",
 ]
 
 [[package]]

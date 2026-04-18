@@ -473,6 +473,120 @@ Pyodide distributions are provided by the [Pyodide project](https://github.com/p
 
 Pyodide is a port of CPython for the WebAssembly / Emscripten platform.
 
+## Custom Python indexes
+
+uv can download managed Python installations from user-controlled indexes in addition to (or in
+place of) the built-in list. An index is a JSON document using the same schema as
+`python-build-standalone`'s
+[`download-metadata.json`](https://github.com/astral-sh/python-build-standalone/blob/main/cpython-unix/build.Dockerfile).
+
+Typical reasons to configure a custom index:
+
+- **Corporate fork.** You maintain patched or internally-signed builds of `python-build-standalone`
+  and want `uv python install` to pick them up transparently.
+- **Experimental builds.** You're evaluating a build with JIT or free-threading enabled that hasn't
+  landed in the official distribution yet.
+- **Air-gapped environment.** Your CI or developer machines cannot reach GitHub releases, and you
+  want to serve the same distributions from an internal mirror.
+
+### Configuration
+
+Declare indexes in `uv.toml`:
+
+```toml
+[[python-indexes]]
+name = "mycorp"
+url = "https://python.mycorp.example.com/versions.json"
+```
+
+Multiple indexes are supported:
+
+```toml
+[[python-indexes]]
+name = "experimental"
+url = "https://experimental.example.com/jit/versions.json"
+
+[[python-indexes]]
+name = "mycorp"
+url = "https://python.mycorp.example.com/versions.json"
+```
+
+By default, custom indexes **augment** the built-in list — they contribute additional Python
+versions. A custom entry with the same key (implementation + version + platform) as a built-in entry
+overrides the built-in. To **replace** the built-in list entirely with a custom index, set
+`default = true`:
+
+```toml
+[[python-indexes]]
+name = "mycorp"
+url = "https://python.mycorp.example.com/versions.json"
+default = true
+```
+
+At most one index may set `default = true`.
+
+### CLI and environment overrides
+
+Pass `--python-index <URL>` to `uv python list`, `uv python find`, `uv python install`,
+`uv python upgrade`, or `uv python pin` to add a one-off index:
+
+```console
+$ uv python install 3.14 --python-index https://experimental.example.com/jit/versions.json
+```
+
+The flag may be repeated to add several indexes on the command line.
+
+The `UV_PYTHON_INDEX` environment variable configures a single index URL — equivalent to a one-entry
+`[[python-indexes]]` block — useful in CI without editing `uv.toml`.
+
+### Precedence
+
+When the same index `name` appears in multiple layers, the higher-priority layer wins:
+
+1. `--python-index` on the command line (highest priority)
+2. `UV_PYTHON_INDEX` environment variable
+3. Project-level `uv.toml`
+4. User-level `~/.config/uv/uv.toml`
+5. System-level `uv.toml` (lowest priority)
+
+Entries with distinct `name`s from different layers are all merged.
+
+### Index format
+
+An index is a JSON object mapping installation keys to metadata, identical to the
+`python-build-standalone` distribution manifest. A minimal entry:
+
+```json
+{
+  "cpython-3.14.0-linux-x86_64-gnu": {
+    "name": "cpython",
+    "arch": { "family": "x86_64", "variant": null },
+    "os": "linux",
+    "libc": "gnu",
+    "major": 3,
+    "minor": 14,
+    "patch": 0,
+    "prerelease": "",
+    "url": "https://python.mycorp.example.com/cpython-3.14.0-linux-x86_64-gnu.tar.gz",
+    "sha256": "c3223d5924a0ed0ef5958a750377c362d0957587f896c0f6c635ae4b39e0f337",
+    "variant": null,
+    "build": "20260101"
+  }
+}
+```
+
+Every entry **must** include a valid 64-character hex `sha256` — custom indexes cannot ship
+unverified binaries. The JSON itself must be served over HTTPS (loopback addresses are permitted for
+local testing).
+
+### Related options
+
+- `python-install-mirror` / `UV_PYTHON_INSTALL_MIRROR` — swaps just the hostname of built-in
+  `python-build-standalone` download URLs while keeping the built-in manifest.
+- `python-downloads-json-url` / `UV_PYTHON_DOWNLOADS_JSON_URL` — replaces the built-in manifest with
+  a single JSON URL. Equivalent to a single `[[python-indexes]]` entry with `default = true`, kept
+  for backwards compatibility.
+
 ## Transparent x86_64 emulation on aarch64
 
 Both macOS and Windows support running x86_64 binaries on aarch64 through transparent emulation.

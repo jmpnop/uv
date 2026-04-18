@@ -1,11 +1,12 @@
+use std::collections::HashSet;
 use std::{fmt::Debug, num::NonZeroUsize, path::Path, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use uv_cache_info::CacheKey;
 use uv_configuration::{
-    BuildIsolation, IndexStrategy, KeyringProviderType, PackageNameSpecifier, ProxyUrl, Reinstall,
-    RequiredVersion, TargetTriple, TrustedHost, TrustedPublishing, Upgrade,
+    BuildIsolation, IndexStrategy, KeyringProviderType, PackageNameSpecifier, ProxyUrl,
+    PythonIndex, Reinstall, RequiredVersion, TargetTriple, TrustedHost, TrustedPublishing, Upgrade,
 };
 use uv_distribution_types::{
     ConfigSettings, ExtraBuildVariables, Index, IndexUrl, IndexUrlError, Origin,
@@ -1191,6 +1192,19 @@ pub struct PythonInstallMirrors {
         "#
     )]
     pub python_downloads_json_url: Option<String>,
+
+    /// Custom Python indexes for downloading managed Python installations.
+    #[option(
+        default = "[]",
+        value_type = "Vec<PythonIndex>",
+        uv_toml_only = true,
+        example = r#"
+            [[python-indexes]]
+            name = "custom-python-repo"
+            url = "https://example.com/python/versions.json"
+        "#
+    )]
+    pub python_indexes: Option<Vec<PythonIndex>>,
 }
 
 impl PythonInstallMirrors {
@@ -1202,6 +1216,27 @@ impl PythonInstallMirrors {
             python_downloads_json_url: self
                 .python_downloads_json_url
                 .or(other.python_downloads_json_url),
+            // Merge layer by name: `self` is higher priority, so its entries override `other`'s
+            // on matching name. This lets a project-level `uv.toml` redefine a globally
+            // configured index (e.g. point `name = "mycorp"` at a fork) without erroring — the
+            // standard "higher layer wins" model every other setting in [`Self`] follows.
+            //
+            // The resulting order is `other`-not-overridden-then-self, which downstream
+            // [`ManagedPythonDownloadList::new`] uses with dedup-last-wins on
+            // [`PythonInstallationKey`] to pick the right entry for each Python build.
+            python_indexes: match (self.python_indexes, other.python_indexes) {
+                (Some(higher), Some(lower)) => {
+                    let higher_names: HashSet<&str> =
+                        higher.iter().map(|index| index.name.as_str()).collect();
+                    let mut merged: Vec<_> = lower
+                        .into_iter()
+                        .filter(|index| !higher_names.contains(index.name.as_str()))
+                        .collect();
+                    merged.extend(higher);
+                    Some(merged)
+                }
+                (a, b) => a.or(b),
+            },
         }
     }
 }
@@ -2435,6 +2470,7 @@ pub struct OptionsWire {
     python_install_mirror: Option<String>,
     pypy_install_mirror: Option<String>,
     python_downloads_json_url: Option<String>,
+    python_indexes: Option<Vec<PythonIndex>>,
 
     // #[serde(flatten)]
     // publish: PublishOptions
@@ -2492,6 +2528,7 @@ impl From<OptionsWire> for Options {
             python_install_mirror,
             pypy_install_mirror,
             python_downloads_json_url,
+            python_indexes,
             concurrent_downloads,
             concurrent_builds,
             concurrent_installs,
@@ -2623,6 +2660,7 @@ impl From<OptionsWire> for Options {
                 python_install_mirror,
                 pypy_install_mirror,
                 python_downloads_json_url,
+                python_indexes,
             },
             conflicts,
             publish: PublishOptions {
@@ -2751,4 +2789,73 @@ pub struct AuditOptions {
         "#
     )]
     pub ignore_until_fixed: Option<Vec<String>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use uv_redacted::DisplaySafeUrl;
+
+    fn python_index(name: &str, url: &str) -> PythonIndex {
+        PythonIndex {
+            name: name.to_owned(),
+            url: DisplaySafeUrl::parse(url).expect("test URL parses"),
+            default: false,
+        }
+    }
+
+    /// `combine` on `python_indexes` deduplicates by `name`, keeping the higher-priority side
+    /// (`self`). Non-overlapping entries from the lower-priority side are preserved in their
+    /// original order, followed by all entries from `self`.
+    #[test]
+    fn python_install_mirrors_combine_dedup_by_name() {
+        let higher = PythonInstallMirrors {
+            python_indexes: Some(vec![
+                python_index("shared", "https://higher.example.com/s.json"),
+                python_index("only-higher", "https://higher.example.com/h.json"),
+            ]),
+            ..PythonInstallMirrors::default()
+        };
+        let lower = PythonInstallMirrors {
+            python_indexes: Some(vec![
+                python_index("only-lower", "https://lower.example.com/l.json"),
+                python_index("shared", "https://lower.example.com/s.json"),
+            ]),
+            ..PythonInstallMirrors::default()
+        };
+
+        let combined = higher.combine(lower);
+        let indexes = combined.python_indexes.expect("merged list is Some");
+
+        let names: Vec<&str> = indexes.iter().map(|i| i.name.as_str()).collect();
+        assert_eq!(names, vec!["only-lower", "shared", "only-higher"]);
+
+        // The `shared` entry keeps the higher-priority URL.
+        let shared = indexes
+            .iter()
+            .find(|i| i.name == "shared")
+            .expect("shared entry survives merge");
+        assert_eq!(shared.url.as_str(), "https://higher.example.com/s.json");
+    }
+
+    /// When one side is `None`, `combine` returns the other side intact.
+    #[test]
+    fn python_install_mirrors_combine_one_empty() {
+        let populated = PythonInstallMirrors {
+            python_indexes: Some(vec![python_index("a", "https://a.example.com/a.json")]),
+            ..PythonInstallMirrors::default()
+        };
+
+        let combined = populated.clone().combine(PythonInstallMirrors::default());
+        assert_eq!(
+            combined.python_indexes.as_deref(),
+            populated.python_indexes.as_deref()
+        );
+
+        let combined = PythonInstallMirrors::default().combine(populated.clone());
+        assert_eq!(
+            combined.python_indexes.as_deref(),
+            populated.python_indexes.as_deref()
+        );
+    }
 }

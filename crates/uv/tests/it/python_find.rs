@@ -150,6 +150,27 @@ fn python_find() {
     ");
 }
 
+/// `--python-index` on `uv python find` threads through to `ManagedPythonDownloadList::new`.
+///
+/// A non-loopback HTTP URL is rejected by `CustomIndexInsecureScheme` — proves the flag is
+/// wired through the download-list construction rather than ignored.
+#[test]
+fn python_find_with_python_index_flag() {
+    let context = uv_test::test_context_with_versions!(&["3.12"]).with_filtered_python_sources();
+
+    uv_snapshot!(context.filters(), context
+        .python_find()
+        .arg("--python-index")
+        .arg("http://example.com/versions.json"), @"
+    success: false
+    exit_code: 2
+    ----- stdout -----
+
+    ----- stderr -----
+    error: Python index `$cli-0` is configured with a plain-HTTP URL (`http://example.com/versions.json`); index JSON must be served over HTTPS (an attacker on the network could otherwise substitute binaries and their expected hashes)
+    ");
+}
+
 #[test]
 fn python_find_pin() {
     let context = uv_test::test_context_with_versions!(&["3.11", "3.12"]);

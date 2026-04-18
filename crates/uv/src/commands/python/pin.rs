@@ -100,6 +100,7 @@ pub(crate) async fn pin(
                     let download_list = ManagedPythonDownloadList::new(
                         &client,
                         install_mirrors.python_downloads_json_url.as_deref(),
+                        install_mirrors.python_indexes.as_deref(),
                     )
                     .await?;
                     warn_if_existing_pin_incompatible_with_project(
@@ -135,6 +136,7 @@ pub(crate) async fn pin(
         install_mirrors.python_install_mirror.as_deref(),
         install_mirrors.pypy_install_mirror.as_deref(),
         install_mirrors.python_downloads_json_url.as_deref(),
+        install_mirrors.python_indexes.as_deref(),
         preview,
     )
     .await

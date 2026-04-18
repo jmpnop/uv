@@ -32,6 +32,7 @@ uv-platform = { workspace = true }
 uv-platform-tags = { workspace = true }
 uv-preview = { workspace = true }
 uv-pypi-types = { workspace = true }
+uv-python-index = { workspace = true, features = ["schemars"] }
 uv-redacted = { workspace = true }
 uv-state = { workspace = true }
 uv-static = { workspace = true }

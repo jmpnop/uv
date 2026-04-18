@@ -66,6 +66,7 @@ uv-preview = { version = "0.0.40", path = "crates/uv-preview" }
 uv-publish = { version = "0.0.40", path = "crates/uv-publish" }
 uv-pypi-types = { version = "0.0.40", path = "crates/uv-pypi-types" }
 uv-python = { version = "0.0.40", path = "crates/uv-python" }
+uv-python-index = { version = "0.0.1", path = "crates/uv-python-index" }
 uv-redacted = { version = "0.0.40", path = "crates/uv-redacted" }
 uv-requirements = { version = "0.0.40", path = "crates/uv-requirements" }
 uv-requirements-txt = { version = "0.0.40", path = "crates/uv-requirements-txt" }

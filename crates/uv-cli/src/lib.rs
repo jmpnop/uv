@@ -16,7 +16,8 @@ use uv_auth::Service;
 use uv_cache::CacheArgs;
 use uv_configuration::{
     ExportFormat, IndexStrategy, KeyringProviderType, PackageNameSpecifier, PipCompileFormat,
-    ProjectBuildBackend, TargetTriple, TrustedHost, TrustedPublishing, VersionControlSystem,
+    ProjectBuildBackend, PythonIndex, TargetTriple, TrustedHost, TrustedPublishing,
+    VersionControlSystem,
 };
 use uv_distribution_types::{
     ConfigSettingEntry, ConfigSettingPackageEntry, Index, IndexUrl, Origin, PipExtraIndex,
@@ -6324,6 +6325,24 @@ pub struct PythonListArgs {
     /// URL pointing to JSON of custom Python installations.
     #[arg(long, value_hint = ValueHint::Other)]
     pub python_downloads_json_url: Option<String>,
+
+    /// Custom Python index to search for downloads.
+    ///
+    /// Can be provided multiple times.
+    #[arg(long, value_name = "URL", value_hint = ValueHint::Url, action = clap::ArgAction::Append)]
+    pub python_index: Vec<DisplaySafeUrl>,
+}
+
+impl PythonListArgs {
+    #[must_use]
+    pub fn install_mirrors(&self) -> PythonInstallMirrors {
+        PythonInstallMirrors {
+            python_install_mirror: None,
+            pypy_install_mirror: None,
+            python_downloads_json_url: self.python_downloads_json_url.clone(),
+            python_indexes: python_indexes_from_cli(&self.python_index),
+        }
+    }
 }
 
 #[derive(Args)]
@@ -6451,6 +6470,12 @@ pub struct PythonInstallArgs {
     #[arg(long, value_hint = ValueHint::Other)]
     pub python_downloads_json_url: Option<String>,
 
+    /// Custom Python index to search for downloads.
+    ///
+    /// Can be provided multiple times.
+    #[arg(long, value_name = "URL", value_hint = ValueHint::Url, action = clap::ArgAction::Append)]
+    pub python_index: Vec<DisplaySafeUrl>,
+
     /// Reinstall the requested Python version, if it's already installed.
     ///
     /// By default, uv will exit successfully if the version is already
@@ -6504,6 +6529,7 @@ impl PythonInstallArgs {
             python_install_mirror: self.mirror.clone(),
             pypy_install_mirror: self.pypy_mirror.clone(),
             python_downloads_json_url: self.python_downloads_json_url.clone(),
+            python_indexes: python_indexes_from_cli(&self.python_index),
         }
     }
 }
@@ -6556,6 +6582,12 @@ pub struct PythonUpgradeArgs {
     #[arg(long, value_hint = ValueHint::Other)]
     pub python_downloads_json_url: Option<String>,
 
+    /// Custom Python index to search for downloads.
+    ///
+    /// Can be provided multiple times.
+    #[arg(long, value_name = "URL", value_hint = ValueHint::Url, action = clap::ArgAction::Append)]
+    pub python_index: Vec<DisplaySafeUrl>,
+
     #[command(flatten)]
     pub compile_bytecode: PythonInstallCompileBytecodeArgs,
 }
@@ -6567,7 +6599,31 @@ impl PythonUpgradeArgs {
             python_install_mirror: self.mirror.clone(),
             pypy_install_mirror: self.pypy_mirror.clone(),
             python_downloads_json_url: self.python_downloads_json_url.clone(),
+            python_indexes: python_indexes_from_cli(&self.python_index),
         }
+    }
+}
+
+/// Convert a list of CLI-supplied `--python-index` URLs into [`PythonIndex`] entries.
+///
+/// Returns `None` when no URLs were provided so the value composes naturally with
+/// [`PythonInstallMirrors::combine`].
+fn python_indexes_from_cli(urls: &[DisplaySafeUrl]) -> Option<Vec<PythonIndex>> {
+    if urls.is_empty() {
+        None
+    } else {
+        Some(
+            urls.iter()
+                .enumerate()
+                .map(|(index, url)| PythonIndex {
+                    // `$`-prefixed names are reserved for synthesized entries and cannot collide
+                    // with a user-defined `[[python-indexes]]` `name` in TOML.
+                    name: format!("$cli-{index}"),
+                    url: url.clone(),
+                    default: false,
+                })
+                .collect(),
+        )
     }
 }
 
@@ -6645,6 +6701,24 @@ pub struct PythonFindArgs {
     /// URL pointing to JSON of custom Python installations.
     #[arg(long, value_hint = ValueHint::Other)]
     pub python_downloads_json_url: Option<String>,
+
+    /// Custom Python index to search for downloads.
+    ///
+    /// Can be provided multiple times.
+    #[arg(long, value_name = "URL", value_hint = ValueHint::Url, action = clap::ArgAction::Append)]
+    pub python_index: Vec<DisplaySafeUrl>,
+}
+
+impl PythonFindArgs {
+    #[must_use]
+    pub fn install_mirrors(&self) -> PythonInstallMirrors {
+        PythonInstallMirrors {
+            python_install_mirror: None,
+            pypy_install_mirror: None,
+            python_downloads_json_url: self.python_downloads_json_url.clone(),
+            python_indexes: python_indexes_from_cli(&self.python_index),
+        }
+    }
 }
 
 #[derive(Args)]

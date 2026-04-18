@@ -700,6 +700,7 @@ hint: If you are running a script with `{}` in the shebang, you may need to incl
                     install_mirrors.python_install_mirror.as_deref(),
                     install_mirrors.pypy_install_mirror.as_deref(),
                     install_mirrors.python_downloads_json_url.as_deref(),
+                    install_mirrors.python_indexes.as_deref(),
                     preview,
                 )
                 .await?
@@ -941,6 +942,7 @@ hint: If you are running a script with `{}` in the shebang, you may need to incl
                     install_mirrors.python_install_mirror.as_deref(),
                     install_mirrors.pypy_install_mirror.as_deref(),
                     install_mirrors.python_downloads_json_url.as_deref(),
+                    install_mirrors.python_indexes.as_deref(),
                     preview,
                 )
                 .await?;

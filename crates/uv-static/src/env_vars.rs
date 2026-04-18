@@ -430,6 +430,13 @@ impl EnvVars {
     #[attr_added_in("0.6.13")]
     pub const UV_PYTHON_DOWNLOADS_JSON_URL: &'static str = "UV_PYTHON_DOWNLOADS_JSON_URL";
 
+    /// A URL pointing to a custom JSON Python download index.
+    ///
+    /// Equivalent to a single `[[python-indexes]]` entry in `uv.toml`; to configure multiple
+    /// custom indexes or override the built-in list, use `uv.toml` instead.
+    #[attr_added_in("next release")]
+    pub const UV_PYTHON_INDEX: &'static str = "UV_PYTHON_INDEX";
+
     /// Specifies the directory for caching the archives of managed Python installations before
     /// installation.
     #[attr_added_in("0.7.0")]

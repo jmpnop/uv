@@ -1,5 +1,5 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -9,7 +9,6 @@ use std::time::{Duration, Instant, SystemTimeError};
 use std::{env, io};
 
 use futures::TryStreamExt;
-use itertools::Itertools;
 use owo_colors::OwoColorize;
 use reqwest_retry::RetryError;
 use reqwest_retry::policies::ExponentialBackoff;
@@ -21,6 +20,7 @@ use tokio_util::either::Either;
 use tracing::{debug, instrument};
 use url::Url;
 
+use indexmap::IndexMap;
 use uv_client::{
     BaseClient, RetriableError, WrappedReqwestError, fetch_with_url_fallback,
     retryable_on_request_failure,
@@ -30,8 +30,10 @@ use uv_extract::hash::Hasher;
 use uv_fs::{Simplified, rename_with_retry};
 use uv_platform::{self as platform, Arch, Libc, Os, Platform};
 use uv_pypi_types::{HashAlgorithm, HashDigest};
+use uv_python_index::PythonIndex;
 use uv_redacted::{DisplaySafeUrl, DisplaySafeUrlError};
 use uv_static::EnvVars;
+use uv_warnings::warn_user_once;
 
 use crate::PythonVariant;
 use crate::implementation::{
@@ -127,6 +129,35 @@ pub enum Error {
     NoPythonDownloadUrlFound,
     #[error(transparent)]
     SystemTime(#[from] SystemTimeError),
+    #[error(
+        "Unsupported URL scheme `{scheme}` in Python index `{name}`; expected `http`, `https`, or `file`"
+    )]
+    UnsupportedIndexScheme { name: String, scheme: String },
+    #[error("At most one `[[python-indexes]]` entry may set `default = true`; found {0}: {1}")]
+    MultipleDefaultPythonIndexes(usize, String),
+    #[error(
+        "Python index `{name}` entry `{key}` is missing a `sha256`; downloads from custom indexes must include a hash"
+    )]
+    CustomIndexMissingHash { name: String, key: String },
+    #[error(
+        "Python index `{name}` entry `{key}` has a malformed `sha256` (expected 64 hex characters, got `{value}`)"
+    )]
+    CustomIndexInvalidHash {
+        name: String,
+        key: String,
+        value: String,
+    },
+    #[error(
+        "Python index `{name}` is configured with a plain-HTTP URL (`{url}`); index JSON must be served over HTTPS (an attacker on the network could otherwise substitute binaries and their expected hashes)"
+    )]
+    CustomIndexInsecureScheme {
+        name: String,
+        url: Box<DisplaySafeUrl>,
+    },
+    #[error(
+        "Duplicate `[[python-indexes]]` name `{0}`; each entry in a single config layer must have a unique name"
+    )]
+    DuplicatePythonIndexName(String),
 }
 
 impl RetriableError for Error {
@@ -1032,74 +1063,174 @@ impl ManagedPythonDownloadList {
     /// `crates/uv-python/download-metadata.json`), or `Some` local path
     /// or file://, http://, or https:// URL.
     ///
+    /// `python_indexes` is a list of custom Python indexes to search for downloads.
+    ///
     /// Returns an error if the provided list could not be opened, if the JSON is invalid, or if it
     /// does not parse into the expected data structure.
     pub async fn new(
         client: &BaseClient,
         python_downloads_json_url: Option<&str>,
+        python_indexes: Option<&[PythonIndex]>,
     ) -> Result<Self, Error> {
-        // Although read_url() handles file:// URLs and converts them to local file reads, here we
-        // want to also support parsing bare filenames like "/tmp/py.json", not just
-        // "file:///tmp/py.json". Note that "C:\Temp\py.json" should be considered a filename, even
-        // though Url::parse would successfully misparse it as a URL with scheme "C".
-        enum Source<'a> {
-            BuiltIn,
-            Path(Cow<'a, Path>),
-            Http(DisplaySafeUrl),
+        // A named source. `index_name` is `None` for the built-in list and the legacy
+        // `python_downloads_json_url` mirror, and `Some` for custom `[[python-indexes]]` entries —
+        // the distinction drives the `sha256`-required check below.
+        struct Source {
+            display_name: String,
+            index_name: Option<String>,
+            location: PythonDownloadLocation,
         }
 
-        let json_source = if let Some(url_or_path) = python_downloads_json_url {
-            if let Ok(url) = DisplaySafeUrl::parse(url_or_path) {
-                match url.scheme() {
-                    "http" | "https" => Source::Http(url),
-                    "file" => Source::Path(Cow::Owned(
-                        url.to_file_path().or(Err(Error::InvalidUrlFormat(url)))?,
-                    )),
-                    _ => Source::Path(Cow::Borrowed(Path::new(url_or_path))),
-                }
-            } else {
-                Source::Path(Cow::Borrowed(Path::new(url_or_path)))
+        // Reject the pathological case of two defaults pointing in different directions.
+        if let Some(indexes) = python_indexes {
+            let defaults: Vec<&str> = indexes
+                .iter()
+                .filter(|index| index.default)
+                .map(|index| index.name.as_str())
+                .collect();
+            if defaults.len() > 1 {
+                return Err(Error::MultipleDefaultPythonIndexes(
+                    defaults.len(),
+                    defaults.join(", "),
+                ));
             }
-        } else {
-            Source::BuiltIn
-        };
 
-        let buf: Cow<'_, [u8]> = match json_source {
-            Source::BuiltIn => BUILTIN_PYTHON_DOWNLOADS_JSON.into(),
-            Source::Path(ref path) => fs_err::read(path.as_ref())?.into(),
-            Source::Http(ref url) => fetch_bytes_from_url(client, url)
-                .await
-                .map_err(|e| Error::FetchingPythonDownloadsJSONError(url.to_string(), Box::new(e)))?
-                .into(),
-        };
-        let json_downloads: HashMap<String, JsonPythonDownload> = serde_json::from_slice(&buf)
-            .map_err(
-                // As an explicit compatibility mechanism, if there's a top-level "version" key, it
-                // means it's a newer format than we know how to deal with.  Before reporting a
-                // parse error about the format of JsonPythonDownload, check for that key. We can do
-                // this by parsing into a Map<String, IgnoredAny> which allows any valid JSON on the
-                // value side. (Because it's zero-sized, Clippy suggests Set<String>, but that won't
-                // have the same parsing effect.)
-                #[expect(clippy::zero_sized_map_values)]
-                |e| {
-                    let source = match json_source {
-                        Source::BuiltIn => "EMBEDDED IN THE BINARY".to_owned(),
-                        Source::Path(path) => path.to_string_lossy().to_string(),
-                        Source::Http(url) => url.to_string(),
-                    };
-                    if let Ok(keys) =
-                        serde_json::from_slice::<HashMap<String, serde::de::IgnoredAny>>(&buf)
-                        && keys.contains_key("version")
-                    {
-                        Error::UnsupportedPythonDownloadsJSON(source)
-                    } else {
-                        Error::InvalidPythonDownloadsJSON(source, e)
-                    }
-                },
-            )?;
+            // Cross-layer duplicates are resolved by [`PythonInstallMirrors::combine`] (higher
+            // layer wins on matching `name`). Any duplicates left in the merged vec must
+            // therefore originate *within* a single layer — a config mistake the user should
+            // hear about clearly instead of silently seeing the second entry shadow the first.
+            let mut seen = HashSet::new();
+            for index in indexes {
+                if !seen.insert(index.name.as_str()) {
+                    return Err(Error::DuplicatePythonIndexName(index.name.clone()));
+                }
+            }
+        }
 
-        let result = parse_json_downloads(json_downloads);
-        Ok(Self { downloads: result })
+        let mut sources = Vec::new();
+
+        // 1. Built-in goes first so higher-versioned built-in entries are never silently shadowed
+        //    by a lower-versioned custom entry when the request doesn't pin an exact version.
+        //    Built-in is suppressed only when either the legacy `python_downloads_json_url` mirror
+        //    is set (backwards compatibility — that option has always replaced the built-in) or a
+        //    custom index opts in with `default = true`.
+        let index_overrides_builtin =
+            python_indexes.is_some_and(|indexes| indexes.iter().any(|idx| idx.default));
+        if python_downloads_json_url.is_none() && !index_overrides_builtin {
+            sources.push(Source {
+                display_name: "embedded in the binary".to_owned(),
+                index_name: None,
+                location: PythonDownloadLocation::BuiltIn,
+            });
+        }
+
+        // 2. Legacy `python_downloads_json_url` replaces the built-in (pre-existing semantics).
+        if let Some(url_or_path) = python_downloads_json_url {
+            sources.push(Source {
+                display_name: redacted_display(url_or_path),
+                index_name: None,
+                location: resolve_location("python-downloads-json-url", url_or_path)?,
+            });
+        }
+
+        // 3. Custom `[[python-indexes]]` entries last — they supply *additional* distributions
+        //    (e.g. patched builds) without masking newer built-in ones.
+        if let Some(indexes) = python_indexes {
+            for index in indexes {
+                sources.push(Source {
+                    display_name: redacted_display(index.url.as_str()),
+                    index_name: Some(index.name.clone()),
+                    location: resolve_location(&index.name, index.url.as_str())?,
+                });
+            }
+        }
+
+        // Collect into an `IndexMap` so later (higher-priority) sources overwrite earlier entries
+        // that share a `PythonInstallationKey`. Built-in is pushed first above, followed by
+        // custom indexes in ascending priority order — so a custom index acting as a patched
+        // drop-in replacement for a built-in entry wins, while a lower-versioned custom entry
+        // with a *different* key coexists with the higher-versioned built-in one.
+        let mut merged: IndexMap<PythonInstallationKey, ManagedPythonDownload> = IndexMap::new();
+
+        for source in sources {
+            if let PythonDownloadLocation::Http(url) = &source.location
+                && url.scheme() == "http"
+                && let Some(index_name) = source.index_name.as_deref()
+            {
+                // Custom HTTP indexes are a MitM hazard: an attacker can swap both the binary URL
+                // and its expected sha256, defeating the hash check. Reject non-loopback HTTP
+                // outright; allow loopback (localhost / 127.0.0.1 / ::1) for local testing.
+                // Built-in and the legacy `python_downloads_json_url` mirror aren't subject to
+                // this check — they've always accepted user-controlled URLs for backwards
+                // compatibility.
+                if is_loopback_http(url) {
+                    warn_user_once!(
+                        "Python index `{index_name}` is fetched over plain HTTP at a loopback address; safe only for local testing"
+                    );
+                } else {
+                    return Err(Error::CustomIndexInsecureScheme {
+                        name: index_name.to_owned(),
+                        url: Box::new(url.clone()),
+                    });
+                }
+            }
+
+            let buf: Cow<'_, [u8]> = match &source.location {
+                PythonDownloadLocation::BuiltIn => BUILTIN_PYTHON_DOWNLOADS_JSON.into(),
+                PythonDownloadLocation::Path(path) => fs_err::read(path)?.into(),
+                PythonDownloadLocation::Http(url) => fetch_bytes_from_url(client, url)
+                    .await
+                    .map_err(|e| {
+                        Error::FetchingPythonDownloadsJSONError(url.to_string(), Box::new(e))
+                    })?
+                    .into(),
+            };
+            let json_downloads: HashMap<String, JsonPythonDownload> = serde_json::from_slice(&buf)
+                .map_err(
+                    // As an explicit compatibility mechanism, if there's a top-level "version" key,
+                    // it means it's a newer format than we know how to deal with. Before reporting
+                    // a parse error about the format of JsonPythonDownload, check for that key. We
+                    // can do this by parsing into a Map<String, IgnoredAny> which allows any valid
+                    // JSON on the value side.
+                    #[expect(clippy::zero_sized_map_values)]
+                    |e| {
+                        let source_name = source.display_name.clone();
+                        if let Ok(keys) =
+                            serde_json::from_slice::<HashMap<String, serde::de::IgnoredAny>>(&buf)
+                            && keys.contains_key("version")
+                        {
+                            Error::UnsupportedPythonDownloadsJSON(source_name)
+                        } else {
+                            Error::InvalidPythonDownloadsJSON(source_name, e)
+                        }
+                    },
+                )?;
+
+            let parsed = parse_json_downloads(json_downloads);
+
+            // Custom indexes MUST carry a valid sha256 per entry — the built-in list always does,
+            // but a user-hosted JSON could otherwise leave installs unverified. Checking after
+            // [`parse_json_downloads`] avoids flagging entries that were dropped anyway (e.g. for
+            // an unparseable version), and gives us the `PythonInstallationKey` for error display.
+            if let Some(index_name) = &source.index_name {
+                for entry in &parsed {
+                    validate_custom_index_hash(index_name, entry)?;
+                }
+            }
+
+            for download in parsed {
+                merged.insert(download.key.clone(), download);
+            }
+        }
+
+        let mut all_downloads: Vec<ManagedPythonDownload> = merged.into_values().collect();
+        // Sort so `find()` / `iter_matching()` return the highest version for a partial request
+        // regardless of which source contributed it.
+        all_downloads.sort_by(|a, b| Ord::cmp(&b.key, &a.key));
+
+        Ok(Self {
+            downloads: all_downloads,
+        })
     }
 
     /// Load available Python distributions from the compiled-in list only.
@@ -1109,8 +1240,114 @@ impl ManagedPythonDownloadList {
             serde_json::from_slice(BUILTIN_PYTHON_DOWNLOADS_JSON).map_err(|e| {
                 Error::InvalidPythonDownloadsJSON("EMBEDDED IN THE BINARY".to_owned(), e)
             })?;
-        let result = parse_json_downloads(json_downloads);
+        let mut result = parse_json_downloads(json_downloads);
+        result.sort_by(|a, b| Ord::cmp(&b.key, &a.key));
         Ok(Self { downloads: result })
+    }
+}
+
+/// Where a JSON Python download list is read from.
+#[derive(Debug, Clone)]
+enum PythonDownloadLocation {
+    BuiltIn,
+    Path(PathBuf),
+    Http(DisplaySafeUrl),
+}
+
+/// Resolve a user-supplied URL-or-path string to a concrete [`PythonDownloadLocation`].
+///
+/// Accepts `http`, `https`, and `file` URL schemes, or a bare filesystem path. Any other scheme
+/// is rejected up-front rather than silently re-interpreted as a path, which would defer the
+/// failure to an obscure "No such file" error at read time and could mask typos
+/// (e.g. `ftp://`).
+fn resolve_location(name: &str, url_or_path: &str) -> Result<PythonDownloadLocation, Error> {
+    let Ok(url) = DisplaySafeUrl::parse(url_or_path) else {
+        // Not a URL at all — treat as a filesystem path. Covers the common `"/tmp/foo.json"` and
+        // `"./relative.json"` cases.
+        return Ok(PythonDownloadLocation::Path(PathBuf::from(url_or_path)));
+    };
+
+    // On Windows, a bare drive path like `C:\Temp\py.json` parses as a URL with scheme `C`. Treat
+    // any single-ASCII-letter scheme as a drive letter there. On other platforms, single-letter
+    // schemes are meaningless and indicate a typo — fall through to `UnsupportedIndexScheme`.
+    #[cfg(windows)]
+    if url.scheme().len() == 1
+        && url
+            .scheme()
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
+    {
+        return Ok(PythonDownloadLocation::Path(PathBuf::from(url_or_path)));
+    }
+
+    match url.scheme() {
+        "http" | "https" => Ok(PythonDownloadLocation::Http(url)),
+        "file" => url
+            .to_file_path()
+            .map(PythonDownloadLocation::Path)
+            .map_err(|()| Error::InvalidFileUrl(url.to_string())),
+        scheme => Err(Error::UnsupportedIndexScheme {
+            name: name.to_owned(),
+            scheme: scheme.to_owned(),
+        }),
+    }
+}
+
+/// Whether an HTTP URL points at a loopback host, i.e. the user's own machine.
+///
+/// A network attacker can't tamper with traffic that never leaves the host, so plain HTTP to
+/// loopback is safe (and necessary for local testing with e.g. `wiremock`).
+fn is_loopback_http(url: &DisplaySafeUrl) -> bool {
+    if url.scheme() != "http" {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Domain(d)) => d == "localhost",
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
+/// Redact credentials from a user-supplied URL string for display in error messages.
+///
+/// Falls back to the raw input when parsing fails — inputs that don't parse as URLs can't
+/// carry credentials in the `user:pass@host` form.
+fn redacted_display(url_or_path: &str) -> String {
+    if let Ok(url) = DisplaySafeUrl::parse(url_or_path) {
+        url.to_string()
+    } else {
+        url_or_path.to_owned()
+    }
+}
+
+/// Validate that a custom-index entry carries a well-formed sha256.
+///
+/// Built-in downloads always have a hash; user-hosted JSON is untrusted and an unverified
+/// install is a supply-chain risk. A non-hex or wrong-length hash passes the old "non-empty
+/// string" check but fails late during extraction as an opaque [`Error::HashMismatch`] — catch
+/// it at load time with a clear error.
+fn validate_custom_index_hash(
+    index_name: &str,
+    entry: &ManagedPythonDownload,
+) -> Result<(), Error> {
+    // Treat `None` and `""` identically — both represent a missing hash, and the `""` case is
+    // likely a user mistake. A malformed hash (wrong length or non-hex) gets its own error so
+    // the user can see their value.
+    match entry.sha256.as_deref() {
+        None | Some("") => Err(Error::CustomIndexMissingHash {
+            name: index_name.to_owned(),
+            key: entry.key.to_string(),
+        }),
+        Some(sha256) if sha256.len() != 64 || !sha256.bytes().all(|b| b.is_ascii_hexdigit()) => {
+            Err(Error::CustomIndexInvalidHash {
+                name: index_name.to_owned(),
+                key: entry.key.to_string(),
+                value: sha256.to_owned(),
+            })
+        }
+        Some(_) => Ok(()),
     }
 }
 
@@ -1680,7 +1917,6 @@ fn parse_json_downloads(
                 build,
             })
         })
-        .sorted_by(|a, b| Ord::cmp(&b.key, &a.key))
         .collect()
 }
 
@@ -1844,6 +2080,29 @@ mod tests {
     use uv_platform::{Arch, Libc, Os, Platform};
 
     use super::*;
+
+    /// Cover every branch of [`is_loopback_http`] without depending on a live socket, so the
+    /// IPv6 branch is exercised even on CI environments that can't bind `[::1]`.
+    #[test]
+    fn is_loopback_http_branches() {
+        let parse = |raw: &str| DisplaySafeUrl::parse(raw).expect("test URL parses");
+
+        // Allowed: http to loopback hosts.
+        assert!(is_loopback_http(&parse("http://localhost/x")));
+        assert!(is_loopback_http(&parse("http://localhost:8080/x")));
+        assert!(is_loopback_http(&parse("http://127.0.0.1/x")));
+        // 127.0.0.0/8 is the full loopback range, not just 127.0.0.1.
+        assert!(is_loopback_http(&parse("http://127.0.0.7/x")));
+        assert!(is_loopback_http(&parse("http://[::1]/x")));
+        // URL parsing lowercases ASCII domains, so uppercase input still matches.
+        assert!(is_loopback_http(&parse("http://LOCALHOST/x")));
+
+        // Rejected: http to non-loopback host, https (scheme gate), and other schemes.
+        assert!(!is_loopback_http(&parse("http://example.com/x")));
+        assert!(!is_loopback_http(&parse("http://8.8.8.8/x")));
+        assert!(!is_loopback_http(&parse("https://localhost/x")));
+        assert!(!is_loopback_http(&parse("file:///tmp/x")));
+    }
 
     /// Parse a request with all of its fields.
     #[test]
@@ -2068,7 +2327,9 @@ mod tests {
         let client = uv_client::BaseClientBuilder::default()
             .build()
             .expect("failed to build base client");
-        let download_list = ManagedPythonDownloadList::new(&client, None).await.unwrap();
+        let download_list = ManagedPythonDownloadList::new(&client, None, None)
+            .await
+            .unwrap();
 
         let downloads: Vec<_> = download_list
             .iter_all()
@@ -2096,7 +2357,9 @@ mod tests {
         let client = uv_client::BaseClientBuilder::default()
             .build()
             .expect("failed to build base client");
-        let download_list = ManagedPythonDownloadList::new(&client, None).await.unwrap();
+        let download_list = ManagedPythonDownloadList::new(&client, None, None)
+            .await
+            .unwrap();
 
         // Should find no matching downloads
         let downloads: Vec<_> = download_list

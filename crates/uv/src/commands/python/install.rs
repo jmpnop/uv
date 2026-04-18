@@ -17,6 +17,7 @@ use tracing::{debug, trace, warn};
 use uv_cache::Cache;
 use uv_client::BaseClientBuilder;
 use uv_configuration::Concurrency;
+use uv_configuration::PythonIndex;
 use uv_fs::Simplified;
 use uv_platform::{Arch, Libc};
 use uv_preview::{Preview, PreviewFeature};
@@ -190,6 +191,7 @@ pub(crate) async fn install(
     python_install_mirror: Option<String>,
     pypy_install_mirror: Option<String>,
     python_downloads_json_url: Option<String>,
+    python_indexes: Option<Vec<PythonIndex>>,
     client_builder: BaseClientBuilder<'_>,
     default: bool,
     python_downloads: PythonDownloads,
@@ -237,6 +239,7 @@ pub(crate) async fn install(
         python_install_mirror,
         pypy_install_mirror,
         python_downloads_json_url,
+        python_indexes,
         client_builder,
         default,
         python_downloads,
@@ -296,6 +299,7 @@ async fn perform_install(
     python_install_mirror: Option<String>,
     pypy_install_mirror: Option<String>,
     python_downloads_json_url: Option<String>,
+    python_indexes: Option<Vec<PythonIndex>>,
     client_builder: BaseClientBuilder<'_>,
     default: bool,
     python_downloads: PythonDownloads,
@@ -339,8 +343,12 @@ async fn perform_install(
     // Python downloads are performing their own retries to catch stream errors, disable the
     // default retries to avoid the middleware from performing uncontrolled retries.
     let client = client_builder.retries(0).build()?;
-    let download_list =
-        ManagedPythonDownloadList::new(&client, python_downloads_json_url.as_deref()).await?;
+    let download_list = ManagedPythonDownloadList::new(
+        &client,
+        python_downloads_json_url.as_deref(),
+        python_indexes.as_deref(),
+    )
+    .await?;
     // TODO(zanieb): We use this variable to special-case .python-version files, but it'd be nice to
     // have generalized request source tracking instead
     let mut is_from_python_version_file = false;

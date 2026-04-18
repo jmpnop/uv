@@ -5,12 +5,13 @@ use std::str::FromStr;
 use std::time::Duration;
 use tracing::info_span;
 use uv_client::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT, DEFAULT_READ_TIMEOUT_UPLOAD};
-use uv_configuration::RequiredVersion;
+use uv_configuration::{PythonIndex, RequiredVersion};
 use uv_dirs::{system_config_file, user_config_dir};
 use uv_distribution_types::Origin;
 use uv_flags::EnvironmentFlags;
 use uv_fs::Simplified;
 use uv_pep440::Version;
+use uv_redacted::DisplaySafeUrl;
 use uv_static::{EnvVars, InvalidEnvironmentVariable, parse_boolish_environment_variable};
 use uv_warnings::warn_user;
 
@@ -432,6 +433,7 @@ fn warn_uv_toml_masked_fields(options: &Options) {
                 python_install_mirror,
                 pypy_install_mirror,
                 python_downloads_json_url,
+                python_indexes,
             },
         publish:
             PublishOptions {
@@ -611,6 +613,9 @@ fn warn_uv_toml_masked_fields(options: &Options) {
     }
     if python_downloads_json_url.is_some() {
         masked_fields.push("python-downloads-json-url");
+    }
+    if python_indexes.is_some() {
+        masked_fields.push("python-indexes");
     }
     if publish_url.is_some() {
         masked_fields.push("publish-url");
@@ -801,6 +806,7 @@ impl EnvironmentOptions {
                 python_downloads_json_url: parse_string_environment_variable(
                     EnvVars::UV_PYTHON_DOWNLOADS_JSON_URL,
                 )?,
+                python_indexes: python_indexes_from_env(EnvVars::UV_PYTHON_INDEX)?,
             },
             log_context: parse_boolish_environment_variable(EnvVars::UV_LOG_CONTEXT)?,
             lfs: parse_boolish_environment_variable(EnvVars::UV_GIT_LFS)?,
@@ -847,6 +853,31 @@ impl EnvironmentOptions {
             init_bare: EnvFlag::new(EnvVars::UV_INIT_BARE)?,
         })
     }
+}
+
+/// Parse a `UV_PYTHON_INDEX` environment variable into a single-entry index list.
+///
+/// The env var accepts only one URL — multi-index configuration is intentionally reserved for
+/// `uv.toml` so the user can name each index and set `default = true`. For a quick override,
+/// the env var is plenty.
+fn python_indexes_from_env(name: &'static str) -> Result<Option<Vec<PythonIndex>>, Error> {
+    let Some(raw) = parse_string_environment_variable(name)? else {
+        return Ok(None);
+    };
+    let url = DisplaySafeUrl::from_str(&raw).map_err(|err| {
+        Error::InvalidEnvironmentVariable(InvalidEnvironmentVariable {
+            name: name.to_string(),
+            value: raw.clone(),
+            err: format!("not a valid URL: {err}"),
+        })
+    })?;
+    Ok(Some(vec![PythonIndex {
+        // `$`-prefixed names are reserved for synthesized entries and cannot collide with a
+        // user-defined `[[python-indexes]]` `name` in TOML.
+        name: "$env".to_owned(),
+        url,
+        default: false,
+    }]))
 }
 
 /// Parse a string environment variable.

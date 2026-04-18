@@ -543,6 +543,11 @@ fn help_subsubcommand() {
           --python-downloads-json-url <PYTHON_DOWNLOADS_JSON_URL>
               URL pointing to JSON of custom Python installations
 
+          --python-index <URL>
+              Custom Python index to search for downloads.
+              
+              Can be provided multiple times.
+
       -r, --reinstall
               Reinstall the requested Python version, if it's already installed.
               
@@ -836,6 +841,8 @@ fn help_flag_subsubcommand() {
               Set the URL to use as the source for downloading PyPy installations
           --python-downloads-json-url <PYTHON_DOWNLOADS_JSON_URL>
               URL pointing to JSON of custom Python installations
+          --python-index <URL>
+              Custom Python index to search for downloads
       -r, --reinstall
               Reinstall the requested Python version, if it's already installed
       -f, --force
