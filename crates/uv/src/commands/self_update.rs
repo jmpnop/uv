@@ -63,8 +63,17 @@ pub(crate) async fn self_update(
         return Ok(ExitStatus::Failure);
     }
 
-    let current = Pep440Version::from_str(env!("CARGO_PKG_VERSION"))
-        .context("failed to parse the current uv version")?;
+    // If `publish-release.sh` set `UV_FORK_VERSION` at build time (e.g.
+    // `UV_FORK_VERSION=v0.11.7-fork.1`), use it as the identity of the running binary so
+    // self-update compares like-with-like against the release tag. Falls back to
+    // `CARGO_PKG_VERSION` for locally-built binaries that weren't produced by the release script.
+    let current = match option_env!("UV_FORK_VERSION") {
+        Some(tag) if !tag.is_empty() => parse_tag_as_version(tag).with_context(|| {
+            format!("UV_FORK_VERSION (`{tag}`) set at build time does not parse as a version")
+        })?,
+        _ => Pep440Version::from_str(env!("CARGO_PKG_VERSION"))
+            .context("failed to parse the current uv version")?,
+    };
 
     let client = client_builder.build()?;
 

@@ -96,7 +96,10 @@ build_target() {
             ;;
     esac
 
-    if ! "${build_cmd[@]}"; then
+    # `UV_FORK_VERSION` is read at build time via `option_env!` in self_update.rs — stamping the
+    # tag in means the resulting binary identifies itself as that release, so `uv self update`
+    # doesn't falsely report "update available" against the tag it's already on.
+    if ! UV_FORK_VERSION="$TAG" "${build_cmd[@]}"; then
         warn "build failed for $target"
         return 0
     fi
