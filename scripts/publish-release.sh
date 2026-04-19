@@ -70,7 +70,7 @@ build_target() {
     local build_cmd=()
     case "$target" in
         *-apple-darwin)
-            build_cmd=(cargo build --release --locked -p uv --target "$target")
+            build_cmd=(cargo build --release --locked --features self-update -p uv --target "$target")
             ;;
         *-unknown-linux-gnu)
             if ! has_cmd cargo-zigbuild; then
@@ -81,14 +81,14 @@ build_target() {
                 warn "skipping $target: zig not installed (\`brew install zig\`)"
                 return 0
             fi
-            build_cmd=(cargo zigbuild --release --locked -p uv --target "$target")
+            build_cmd=(cargo zigbuild --release --locked --features self-update -p uv --target "$target")
             ;;
         *-pc-windows-msvc)
             if ! has_cmd cargo-xwin; then
                 warn "skipping $target: cargo-xwin not installed (\`cargo install cargo-xwin\`)"
                 return 0
             fi
-            build_cmd=(cargo xwin build --release --locked -p uv --target "$target")
+            build_cmd=(cargo xwin build --release --locked --features self-update -p uv --target "$target")
             ;;
         *)
             warn "skipping $target: no build strategy configured"
