@@ -1,0 +1,68 @@
+# Config for the custom Python index pipeline.
+#
+# `release.py` reads this file to decide what to build, where to put things, and
+# which GitHub Release tag to publish to.
+
+[python]
+# Source tree of the CPython checkout to build.
+version = "3.14.4"
+source_dir = "~/PycharmProjects/python-3.14.4/Python-3.14.4"
+
+# macOS universal2 builds produce a single fat binary that runs on both Apple
+# Silicon and Intel. uv's `PythonInstallationKey` doesn't understand
+# "universal2", so we emit two versions.json entries (one per arch) pointing at
+# the same tarball. End users get a working binary either way.
+arches = ["aarch64", "x86_64"]
+os     = "darwin"
+libc   = "none"
+
+# Directory (relative to the repo root) where packaged tarballs and generated
+# versions.json land before upload.
+dist_dir = "dist/python"
+
+# ---- Flavors ----
+#
+# Each flavor defines:
+#   - `configure_flags`: extra flags passed to `./configure`
+#   - `variant`: the `variant` field uv writes into the `PythonInstallationKey`
+#                (null => default stable build; "freethreaded" / "jit" recognised
+#                 by uv; arbitrary strings allowed for forks)
+#   - `build`:   opaque build-date string uv displays alongside the version
+
+[flavors.default]
+configure_flags = [
+    "--enable-universalsdk",
+    "--with-universal-archs=universal2",
+    "--enable-optimizations",
+]
+variant = ""   # "" -> no variant (plain cpython)
+build   = "jmpnop.1"
+
+[flavors.jit]
+configure_flags = [
+    "--enable-universalsdk",
+    "--with-universal-archs=universal2",
+    "--enable-optimizations",
+    "--enable-experimental-jit",
+]
+variant = "jit"
+build   = "jmpnop.1"
+
+[flavors.freethreaded]
+configure_flags = [
+    "--enable-universalsdk",
+    "--with-universal-archs=universal2",
+    "--enable-optimizations",
+    "--disable-gil",
+]
+variant = "freethreaded"
+build   = "jmpnop.1"
+
+# ---- Publish ----
+
+[publish]
+repo        = "jmpnop/uv"
+release_tag = "python-builds"
+# Publicly addressable URL prefix the versions.json points at. Must match where
+# `publish.py` uploads the tarballs.
+url_prefix  = "https://github.com/jmpnop/uv/releases/download/python-builds/"
