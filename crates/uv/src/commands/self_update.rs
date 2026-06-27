@@ -7,8 +7,8 @@
 //! recover from [`std::env::current_exe`].
 //!
 //! The implementation intentionally talks *only* to `github.com/jmpnop/uv`: no astral mirror, no
-//! PyPI fallback, no axoupdater receipt. Users who installed this fork via `install.sh` /
-//! `install.ps1` (the scripts shipped in every release) are the only supported target.
+//! PyPI fallback, no axoupdater receipt. Users who installed this fork via `install.sh` (the
+//! macOS installer shipped in every release) are the only supported target.
 use std::fmt::Write as _;
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -67,12 +67,18 @@ pub(crate) async fn self_update(
     // `UV_FORK_VERSION=v0.11.7-fork.1`), use it as the identity of the running binary so
     // self-update compares like-with-like against the release tag. Falls back to
     // `CARGO_PKG_VERSION` for locally-built binaries that weren't produced by the release script.
-    let current = match option_env!("UV_FORK_VERSION") {
-        Some(tag) if !tag.is_empty() => parse_tag_as_version(tag).with_context(|| {
-            format!("UV_FORK_VERSION (`{tag}`) set at build time does not parse as a version")
-        })?,
-        _ => Pep440Version::from_str(env!("CARGO_PKG_VERSION"))
-            .context("failed to parse the current uv version")?,
+    let (current, current_display) = match option_env!("UV_FORK_VERSION") {
+        Some(tag) if !tag.is_empty() => (
+            parse_tag_as_version(tag).with_context(|| {
+                format!("UV_FORK_VERSION (`{tag}`) set at build time does not parse as a version")
+            })?,
+            tag.to_string(),
+        ),
+        _ => (
+            Pep440Version::from_str(env!("CARGO_PKG_VERSION"))
+                .context("failed to parse the current uv version")?,
+            format!("v{}", env!("CARGO_PKG_VERSION")),
+        ),
     };
 
     let client = client_builder.build()?;
@@ -100,7 +106,7 @@ pub(crate) async fn self_update(
             "{}{} You're already on version {} of uv{}.",
             "success".green().bold(),
             ":".bold(),
-            format!("v{current}").bold().cyan(),
+            current_display.bold().cyan(),
             if version.is_none() {
                 " (the latest version)"
             } else {
@@ -154,7 +160,7 @@ pub(crate) async fn self_update(
         "{}{} Updated uv to {}",
         "success".green().bold(),
         ":".bold(),
-        format!("v{target}").bold().cyan(),
+        target_tag.bold().cyan(),
     )?;
     Ok(ExitStatus::Success)
 }

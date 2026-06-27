@@ -135,7 +135,6 @@ package_target() {
 
 stage_installers() {
     cp "$ROOT_DIR/install.sh"  "$DIST_DIR/uv-installer.sh"
-    cp "$ROOT_DIR/install.ps1" "$DIST_DIR/uv-installer.ps1"
 }
 
 publish_release() {
@@ -146,14 +145,9 @@ Prebuilt binaries for the \`jmpnop/uv\` fork, built locally with \`scripts/publi
 
 ## Install
 
-macOS / Linux:
+macOS (Intel, Apple Silicon):
 \`\`\`
 curl -LsSf https://github.com/${REPO}/releases/download/${TAG}/uv-installer.sh | sh
-\`\`\`
-
-Windows (PowerShell):
-\`\`\`
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/${REPO}/releases/download/${TAG}/uv-installer.ps1 | iex"
 \`\`\`
 EOF
 
