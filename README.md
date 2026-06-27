@@ -32,7 +32,16 @@ uv self update
 
 `uv self update` on this fork queries **`github.com/jmpnop/uv/releases`** only — never astral's
 upstream. It's a direct replacement that downloads the installer from the latest release tag and
-re-runs it against the same directory the current `uv` binary is installed in.
+re-runs it against the same directory the current `uv` binary is installed in. It selects the newest
+release by version (not by publish order), so a freshly cut tag is always picked up.
+
+### Versioning
+
+Releases are tagged `vX.Y.Z-N`, where `X.Y.Z` is the upstream uv version this fork is based on and
+`-N` is the fork build number. `-N` is treated as a [PEP 440](https://peps.python.org/pep-0440/)
+post-release, so builds order monotonically (`v0.11.24-2` > `v0.11.24-1` > `v0.11.24`) and
+`uv self update` can tell newer fork builds apart even when the upstream base is unchanged.
+`uv --version` reports the full fork version, e.g. `0.11.24-3`.
 
 Uninstall by removing the binary (default location `~/.local/bin/uv`). Clean up uv's managed state
 with `uv cache clean && rm -rf "$(uv python dir)" "$(uv tool dir)"`.
