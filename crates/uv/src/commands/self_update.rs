@@ -197,11 +197,25 @@ async fn fetch_latest_release_tag(
         .await
         .context("invalid JSON from github.com")?;
 
+    select_latest_tag(releases)
+        .ok_or_else(|| anyhow!("no stable releases published yet for `{FORK_REPO}`"))
+}
+
+/// Pick the highest-versioned stable (non-draft, non-prerelease) release tag.
+///
+/// GitHub's `/releases` list is not reliably ordered newest-first, so select by parsed version
+/// rather than trusting list order. Tags that don't parse are skipped.
+fn select_latest_tag(releases: Vec<GitHubRelease>) -> Option<String> {
     releases
         .into_iter()
-        .find(|r| !r.draft && !r.prerelease)
-        .map(|r| r.tag_name)
-        .ok_or_else(|| anyhow!("no stable releases published yet for `{FORK_REPO}`"))
+        .filter(|release| !release.draft && !release.prerelease)
+        .filter_map(|release| {
+            parse_tag_as_version(&release.tag_name)
+                .ok()
+                .map(|version| (version, release.tag_name))
+        })
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .map(|(_, tag_name)| tag_name)
 }
 
 /// Download `url` to `dest`, authenticated with `token` if provided.
@@ -340,6 +354,46 @@ mod tests {
         // The legacy `-fork.N` form maps to the same post release for self-update continuity.
         assert_eq!(parse_tag_as_version("v0.11.24-fork.1").unwrap(), release1);
         assert_eq!(parse_tag_as_version("v0.11.24-fork.2").unwrap(), release2);
+    }
+
+    #[test]
+    fn select_latest_picks_max_version_not_list_order() {
+        // GitHub's `/releases` list is not reliably ordered newest-first; selection must be by
+        // parsed version. Here the newest release (`-3`) is deliberately not first in the list.
+        let release = |tag: &str| GitHubRelease {
+            tag_name: tag.to_string(),
+            prerelease: false,
+            draft: false,
+        };
+        let releases = vec![
+            release("v0.11.24-fork.2"),
+            release("v0.11.24-fork.1"),
+            release("v0.11.24-3"),
+            release("v0.11.7-fork.1"),
+        ];
+        assert_eq!(select_latest_tag(releases).as_deref(), Some("v0.11.24-3"));
+    }
+
+    #[test]
+    fn select_latest_skips_drafts_and_prereleases() {
+        let releases = vec![
+            GitHubRelease {
+                tag_name: "v0.11.24-9".to_string(),
+                prerelease: true,
+                draft: false,
+            },
+            GitHubRelease {
+                tag_name: "v0.11.24-8".to_string(),
+                prerelease: false,
+                draft: true,
+            },
+            GitHubRelease {
+                tag_name: "v0.11.24-3".to_string(),
+                prerelease: false,
+                draft: false,
+            },
+        ];
+        assert_eq!(select_latest_tag(releases).as_deref(), Some("v0.11.24-3"));
     }
 
     #[test]

@@ -85,19 +85,34 @@ fn commit_info(workspace_root: &Path) {
     // Describe can fail for some commits
     // https://git-scm.com/docs/pretty-formats#Documentation/pretty-formats.txt-emdescribeoptionsem
     if let Some(describe) = parts.next() {
-        let mut describe_parts = describe.split('-');
-        println!(
-            "cargo:rustc-env={}={}",
-            EnvVars::UV_LAST_TAG,
-            describe_parts.next().unwrap()
-        );
-        // If this is the tagged commit, this component will be missing
+        let (last_tag, distance) = parse_describe(describe);
+        println!("cargo:rustc-env={}={}", EnvVars::UV_LAST_TAG, last_tag);
+        // If this is the tagged commit, the distance is zero.
         println!(
             "cargo:rustc-env={}={}",
             EnvVars::UV_LAST_TAG_DISTANCE,
-            describe_parts.next().unwrap_or("0")
+            distance
         );
     }
+}
+
+/// Split `git describe` output into `(tag, commits_since_tag)`.
+///
+/// The output is either `<tag>` when built from the exact tagged commit, or
+/// `<tag>-<distance>-g<hash>` otherwise. The fork tags releases as `vX.Y.Z-N`, so `<tag>` itself
+/// contains `-`; parse the `-<distance>-g<hash>` suffix from the right rather than splitting on the
+/// first `-`, which would mistake the tag's own `-N` for the commit distance.
+fn parse_describe(describe: &str) -> (&str, &str) {
+    if let Some((prefix, abbrev_hash)) = describe.rsplit_once('-') {
+        if abbrev_hash.starts_with('g') {
+            if let Some((tag, distance)) = prefix.rsplit_once('-') {
+                if !distance.is_empty() && distance.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return (tag, distance);
+                }
+            }
+        }
+    }
+    (describe, "0")
 }
 
 fn git_head(git_dir: &Path) -> Option<PathBuf> {
