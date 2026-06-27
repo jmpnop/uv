@@ -6,17 +6,12 @@
 #     TARGETS="x86_64-apple-darwin ..." scripts/publish-release.sh <tag>
 #     DRY_RUN=1 scripts/publish-release.sh <tag>  # build + package, skip upload
 #
-# Targets supported out of the box (skipped gracefully if toolchain missing):
+# Targets supported out of the box:
 #     x86_64-apple-darwin        rustup target (native on Intel macOS)
 #     aarch64-apple-darwin       rustup target (native on Apple Silicon)
-#     x86_64-unknown-linux-gnu   cargo-zigbuild
-#     aarch64-unknown-linux-gnu  cargo-zigbuild
-#     x86_64-pc-windows-msvc     cargo-xwin
 #
-# Optional toolchains:
-#     cargo install cargo-zigbuild         # linux cross-compile from macOS
-#     cargo install cargo-xwin             # windows cross-compile from macOS
-#     brew install zig                     # required by cargo-zigbuild
+# This fork ships macOS-only binaries. To build other targets, override TARGETS and install
+# the relevant cross toolchains (e.g. cargo-zigbuild + zig for Linux, cargo-xwin for Windows).
 #
 # No GitHub Actions involved. `gh release create` uploads the tarballs + installer scripts.
 
@@ -34,9 +29,6 @@ DRY_RUN="${DRY_RUN:-}"
 ALL_TARGETS=(
     x86_64-apple-darwin
     aarch64-apple-darwin
-    x86_64-unknown-linux-gnu
-    aarch64-unknown-linux-gnu
-    x86_64-pc-windows-msvc
 )
 TARGETS_ARR=(${TARGETS:-${ALL_TARGETS[@]}})
 

@@ -11,20 +11,14 @@ An extremely fast Python package and project manager, written in Rust.
 
 ## Installation
 
-macOS and Linux:
+macOS (Intel, Apple Silicon):
 
 ```bash
 curl -LsSf https://github.com/jmpnop/uv/releases/latest/download/uv-installer.sh | sh
 ```
 
-Windows:
-
-```powershell
-powershell -ExecutionPolicy ByPass -c "irm https://github.com/jmpnop/uv/releases/latest/download/uv-installer.ps1 | iex"
-```
-
-Prebuilt binaries for Linux (x86_64, aarch64), macOS (Intel, Apple Silicon), and Windows (x86_64)
-are published on every tag. To pin to a specific version:
+Prebuilt binaries for macOS (Intel, Apple Silicon) are published on every tag. To pin to a specific
+version:
 
 ```bash
 UV_VERSION=v0.11.24-fork.1 curl -LsSf https://github.com/jmpnop/uv/releases/download/v0.11.24-fork.1/uv-installer.sh | sh
@@ -73,7 +67,7 @@ with `uv cache clean && rm -rf "$(uv python dir)" "$(uv tool dir)"`.
 - Disk-space efficient, with a [global cache](https://docs.astral.sh/uv/concepts/cache) for
   dependency deduplication.
 - Installable without Rust or Python via `curl` or `pip`.
-- Supports macOS, Linux, and Windows.
+- Supports macOS (Intel, Apple Silicon).
 
 uv is backed by [Astral](https://astral.sh), the creators of
 [Ruff](https://github.com/astral-sh/ruff) and [ty](https://github.com/astral-sh/ty).
