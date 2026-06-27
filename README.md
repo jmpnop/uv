@@ -27,7 +27,7 @@ Prebuilt binaries for Linux (x86_64, aarch64), macOS (Intel, Apple Silicon), and
 are published on every tag. To pin to a specific version:
 
 ```bash
-UV_VERSION=v0.11.7-fork.1 curl -LsSf https://github.com/jmpnop/uv/releases/download/v0.11.7-fork.1/uv-installer.sh | sh
+UV_VERSION=v0.11.24-fork.1 curl -LsSf https://github.com/jmpnop/uv/releases/download/v0.11.24-fork.1/uv-installer.sh | sh
 ```
 
 Update to the latest fork release in-place:
