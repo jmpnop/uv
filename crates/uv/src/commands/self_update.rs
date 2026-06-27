@@ -64,7 +64,7 @@ pub(crate) async fn self_update(
     }
 
     // If `publish-release.sh` set `UV_FORK_VERSION` at build time (e.g.
-    // `UV_FORK_VERSION=v0.11.7-fork.1`), use it as the identity of the running binary so
+    // `UV_FORK_VERSION=v0.11.24-2`), use it as the identity of the running binary so
     // self-update compares like-with-like against the release tag. Falls back to
     // `CARGO_PKG_VERSION` for locally-built binaries that weren't produced by the release script.
     let (current, current_display) = match option_env!("UV_FORK_VERSION") {
@@ -280,8 +280,8 @@ fn installed_binary_parent() -> Result<PathBuf> {
         .ok_or_else(|| anyhow!("current executable has no parent directory"))
 }
 
-/// Convert an explicit user-supplied version to a tag form (`0.11.7` → `v0.11.7`, but `v0.11.7` /
-/// `v0.11.7-fork.1` pass through).
+/// Convert an explicit user-supplied version to a tag form (`0.11.24` → `v0.11.24`, but `v0.11.24` /
+/// `v0.11.24-2` pass through).
 fn normalize_tag(input: &str) -> String {
     if input.starts_with('v') {
         input.to_owned()
@@ -290,12 +290,15 @@ fn normalize_tag(input: &str) -> String {
     }
 }
 
-/// Parse a release tag like `v0.11.7` or `v0.11.7-fork.1` into a PEP 440 version (for comparison).
+/// Parse a release tag like `v0.11.24` or `v0.11.24-2` into a PEP 440 version (for comparison).
 fn parse_tag_as_version(tag: &str) -> Result<Pep440Version> {
     let trimmed = tag.strip_prefix('v').unwrap_or(tag);
-    // PEP 440 uses `.post` / `.dev` / `rc`, not `-fork.N`. Map `-fork.N` to `.postN` so ordering
-    // works: v0.11.7-fork.2 > v0.11.7-fork.1 > v0.11.7.
+    // The fork tags releases as `X.Y.Z-N` (e.g. v0.11.24-2). PEP 440 expresses an `-N` suffix as a
+    // post release, so map it to `.postN` for ordering: v0.11.24-2 > v0.11.24-1 > v0.11.24. Also
+    // accept the legacy `-fork.N` form so binaries built from older tags still compare correctly.
     let normalized = if let Some((base, suffix)) = trimmed.split_once("-fork.") {
+        format!("{base}.post{suffix}")
+    } else if let Some((base, suffix)) = trimmed.split_once('-') {
         format!("{base}.post{suffix}")
     } else {
         trimmed.to_owned()
@@ -321,19 +324,22 @@ mod tests {
 
     #[test]
     fn normalize_tag_adds_v_prefix() {
-        assert_eq!(normalize_tag("0.11.7"), "v0.11.7");
-        assert_eq!(normalize_tag("v0.11.7"), "v0.11.7");
-        assert_eq!(normalize_tag("v0.11.7-fork.1"), "v0.11.7-fork.1");
+        assert_eq!(normalize_tag("0.11.24"), "v0.11.24");
+        assert_eq!(normalize_tag("v0.11.24"), "v0.11.24");
+        assert_eq!(normalize_tag("v0.11.24-2"), "v0.11.24-2");
     }
 
     #[test]
     fn parse_tag_understands_fork_suffix() {
-        let plain = parse_tag_as_version("v0.11.7").unwrap();
-        let fork1 = parse_tag_as_version("v0.11.7-fork.1").unwrap();
-        let fork2 = parse_tag_as_version("v0.11.7-fork.2").unwrap();
-        // `-fork.N` must sort above the plain release and monotonically by N.
-        assert!(fork1 > plain);
-        assert!(fork2 > fork1);
+        let plain = parse_tag_as_version("v0.11.24").unwrap();
+        let release1 = parse_tag_as_version("v0.11.24-1").unwrap();
+        let release2 = parse_tag_as_version("v0.11.24-2").unwrap();
+        // `-N` must sort above the plain release and monotonically by N.
+        assert!(release1 > plain);
+        assert!(release2 > release1);
+        // The legacy `-fork.N` form maps to the same post release for self-update continuity.
+        assert_eq!(parse_tag_as_version("v0.11.24-fork.1").unwrap(), release1);
+        assert_eq!(parse_tag_as_version("v0.11.24-fork.2").unwrap(), release2);
     }
 
     #[test]

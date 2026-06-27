@@ -21,7 +21,7 @@ Prebuilt binaries for macOS (Intel, Apple Silicon) are published on every tag. T
 version:
 
 ```bash
-UV_VERSION=v0.11.24-fork.1 curl -LsSf https://github.com/jmpnop/uv/releases/download/v0.11.24-fork.1/uv-installer.sh | sh
+UV_VERSION=v0.11.24-3 curl -LsSf https://github.com/jmpnop/uv/releases/download/v0.11.24-3/uv-installer.sh | sh
 ```
 
 Update to the latest fork release in-place:
