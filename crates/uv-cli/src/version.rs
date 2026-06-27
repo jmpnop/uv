@@ -117,8 +117,15 @@ pub fn uv_self_version() -> SelfVersionInfo {
         };
     }
 
-    // This version is pulled from Cargo.toml and set by Cargo
-    let version = uv_version::version().to_string();
+    // The base version is pulled from Cargo.toml and set by Cargo. Release binaries built by
+    // `scripts/publish-release.sh` stamp `UV_FORK_VERSION` with the fork release tag (e.g.
+    // `v0.11.24-fork.1`); when present, surface it so `uv --version` and `uv self version`
+    // identify the exact fork build rather than just the upstream base version. Local builds
+    // without the stamp fall back to the crate version.
+    let version = option_env!("UV_FORK_VERSION")
+        .filter(|tag| !tag.is_empty())
+        .map(|tag| tag.strip_prefix('v').unwrap_or(tag).to_string())
+        .unwrap_or_else(|| uv_version::version().to_string());
 
     // Commit info is pulled from git and set by `build.rs`
     let commit_info = option_env_str!("UV_COMMIT_HASH").map(|commit_hash| CommitInfo {

@@ -21,6 +21,10 @@ fn main() {
 
     let target = std::env::var(EnvVars::TARGET).unwrap();
     println!("cargo:rustc-env=RUST_HOST_TARGET={target}");
+
+    // The fork release tag is stamped in via `UV_FORK_VERSION` and surfaced in `uv --version`;
+    // rebuild when it changes so incremental builds don't report a stale tag.
+    println!("cargo:rerun-if-env-changed=UV_FORK_VERSION");
 }
 
 fn commit_info(workspace_root: &Path) {

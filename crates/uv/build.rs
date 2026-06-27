@@ -38,4 +38,6 @@ fn main() {
         embed_manifest(manifest).expect("unable to embed manifest");
     }
     println!("cargo:rerun-if-changed=build.rs");
+    // `uv self update` reads `UV_FORK_VERSION` via `option_env!`; rebuild when it changes.
+    println!("cargo:rerun-if-env-changed=UV_FORK_VERSION");
 }
