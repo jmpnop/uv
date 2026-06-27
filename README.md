@@ -43,6 +43,14 @@ post-release, so builds order monotonically (`v0.11.24-2` > `v0.11.24-1` > `v0.1
 `uv self update` can tell newer fork builds apart even when the upstream base is unchanged.
 `uv --version` reports the full fork version, e.g. `0.11.24-3`.
 
+### Code signing
+
+macOS release binaries are **Developer ID signed (hardened runtime) and notarized**, so they pass
+Gatekeeper even when downloaded through a quarantine-setting path such as a browser or AirDrop. The
+`curl | sh` installer extracts with `tar`, which sets no quarantine, so binaries run regardless.
+(Bare CLI binaries can't have a notarization ticket stapled, so the notarization check is performed
+online.)
+
 Uninstall by removing the binary (default location `~/.local/bin/uv`). Clean up uv's managed state
 with `uv cache clean && rm -rf "$(uv python dir)" "$(uv tool dir)"`.
 

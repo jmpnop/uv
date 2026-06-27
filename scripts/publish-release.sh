@@ -4,7 +4,8 @@
 # Usage:
 #     scripts/publish-release.sh <tag>            # build everything supported, publish
 #     TARGETS="x86_64-apple-darwin ..." scripts/publish-release.sh <tag>
-#     DRY_RUN=1 scripts/publish-release.sh <tag>  # build + package, skip upload
+#     DRY_RUN=1 scripts/publish-release.sh <tag>  # build + package, skip upload + notarization
+#     SIGN=0    scripts/publish-release.sh <tag>  # skip code signing + notarization
 #
 # Targets supported out of the box:
 #     x86_64-apple-darwin        rustup target (native on Intel macOS)
@@ -12,6 +13,13 @@
 #
 # This fork ships macOS-only binaries. To build other targets, override TARGETS and install
 # the relevant cross toolchains (e.g. cargo-zigbuild + zig for Linux, cargo-xwin for Windows).
+#
+# macOS binaries are Developer ID signed (hardened runtime) and notarized so they pass
+# Gatekeeper even when downloaded through a quarantine-setting path (browser/AirDrop). The
+# signing identity and App Store Connect notary key are read from ~/.config/macos-codesign/
+# (see the macos-codesign skill); if neither is present the build still succeeds but ships
+# unsigned, with a warning. Bare CLI binaries can't be stapled, so notarization is recognized
+# online (our curl|tar installer sets no quarantine, so it runs regardless).
 #
 # No GitHub Actions involved. `gh release create` uploads the tarballs + installer scripts.
 
@@ -25,6 +33,9 @@ fi
 TAG="$1"
 REPO="${REPO:-jmpnop/uv}"
 DRY_RUN="${DRY_RUN:-}"
+SIGN="${SIGN:-1}"
+CODESIGN_CFG="$HOME/.config/macos-codesign"
+NOTARY_PROFILE="macos-codesign-notary"
 
 ALL_TARGETS=(
     x86_64-apple-darwin
@@ -35,6 +46,9 @@ TARGETS_ARR=(${TARGETS:-${ALL_TARGETS[@]}})
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist/$TAG"
 mkdir -p "$DIST_DIR"
+# Signed binaries are copied here so a single notary submission covers every target. Dot-prefixed
+# so the `"$DIST_DIR"/*` upload glob never picks it up.
+NOTARIZE_STAGE="$DIST_DIR/.notarize"
 
 say()  { printf '\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarn:\033[0m %s\n' "$*" >&2; }
@@ -52,6 +66,81 @@ install_rustup_target() {
         say "Installing rustup target $t"
         rustup target add "$t"
     fi
+}
+
+# Resolve the Developer ID Application identity: explicit override, then the skill's identity.env,
+# then whatever is in the keychain. Empty output means "no identity available".
+resolve_codesign_identity() {
+    if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+        printf '%s' "$CODESIGN_IDENTITY"
+        return 0
+    fi
+    if [[ -f "$CODESIGN_CFG/identity.env" ]]; then
+        # shellcheck disable=SC1090
+        . "$CODESIGN_CFG/identity.env"
+    fi
+    if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+        printf '%s' "$CODESIGN_IDENTITY"
+        return 0
+    fi
+    security find-identity -v -p codesigning 2>/dev/null \
+        | sed -n 's/.*"\(Developer ID Application: [^"]*\)".*/\1/p' | head -1
+}
+
+# Developer ID sign uv/uvx in a staged directory with the hardened runtime + secure timestamp
+# (both prerequisites for notarization). Best-effort: warns and ships unsigned if no identity.
+sign_stage() {
+    local stage="$1" identity binary
+    [[ "$SIGN" == 1 ]] || { warn "SIGN=0 — shipping unsigned"; return 0; }
+    [[ "$(uname)" == Darwin ]] || return 0
+    identity="$(resolve_codesign_identity)"
+    if [[ -z "$identity" ]]; then
+        warn "no Developer ID Application identity found — shipping UNSIGNED (set up ~/.config/macos-codesign or pass SIGN=0)"
+        return 0
+    fi
+    for binary in "$stage/uv" "$stage/uvx"; do
+        [[ -f "$binary" ]] || continue
+        say "Signing $(basename "$binary") with $identity"
+        codesign --force --timestamp --options runtime --sign "$identity" "$binary"
+        codesign --verify --strict "$binary"
+    done
+    mkdir -p "$NOTARIZE_STAGE/$(basename "$stage")"
+    cp "$stage/uv" "$NOTARIZE_STAGE/$(basename "$stage")/" 2>/dev/null || true
+    [[ -f "$stage/uvx" ]] && cp "$stage/uvx" "$NOTARIZE_STAGE/$(basename "$stage")/" || true
+}
+
+# Submit every signed binary to Apple's notary service in one zip and wait for acceptance. The
+# tarballs already contain these exact (signed) binaries, so registering their cdhashes notarizes
+# what we ship. Bare Mach-O binaries cannot be stapled, so acceptance is recognized online.
+notarize_artifacts() {
+    [[ "$SIGN" == 1 ]] || return 0
+    [[ "$(uname)" == Darwin ]] || return 0
+    [[ -n "$DRY_RUN" ]] && { say "DRY_RUN set — skipping notarization"; return 0; }
+    [[ -d "$NOTARIZE_STAGE" ]] && find "$NOTARIZE_STAGE" -type f | grep -q . || {
+        warn "nothing signed to notarize — skipping"
+        return 0
+    }
+    if ! xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1; then
+        if [[ -f "$CODESIGN_CFG/notary_key_id" && -f "$CODESIGN_CFG/notary_issuer" ]] \
+            && ls "$CODESIGN_CFG"/AuthKey_*.p8 >/dev/null 2>&1; then
+            say "Registering notary profile from $CODESIGN_CFG"
+            xcrun notarytool store-credentials "$NOTARY_PROFILE" \
+                --key "$(ls "$CODESIGN_CFG"/AuthKey_*.p8 | head -1)" \
+                --key-id "$(cat "$CODESIGN_CFG/notary_key_id")" \
+                --issuer "$(cat "$CODESIGN_CFG/notary_issuer")" >/dev/null
+        else
+            warn "no notary credentials in $CODESIGN_CFG — binaries are signed but NOT notarized"
+            return 0
+        fi
+    fi
+    local zip="$DIST_DIR/.notarize-bundle.zip"
+    rm -f "$zip"
+    (cd "$NOTARIZE_STAGE" && zip -rq "$zip" .)
+    say "Submitting to Apple notary service (waits for acceptance)…"
+    xcrun notarytool submit "$zip" --keychain-profile "$NOTARY_PROFILE" --wait
+    rm -f "$zip"
+    rm -rf "$NOTARIZE_STAGE"
+    say "Notarization accepted — shipped binaries are signed + notarized."
 }
 
 build_target() {
@@ -119,6 +208,12 @@ package_target() {
     cp "$src/uv$ext" "$stage/uv$ext"
     [[ -x "$src/uvx$ext" ]] && cp "$src/uvx$ext" "$stage/uvx$ext" || true
 
+    # Sign before archiving so the tarball carries the Developer ID signature; notarization of the
+    # cdhash happens once for all targets after the build loop.
+    if [[ "$target" == *-apple-darwin* ]]; then
+        sign_stage "$stage"
+    fi
+
     local archive_name=""
     if [[ "$target" == *windows* ]]; then
         archive_name="uv-$target.zip"
@@ -177,6 +272,8 @@ main() {
     for t in "${TARGETS_ARR[@]}"; do
         build_target "$t"
     done
+
+    notarize_artifacts
 
     stage_installers
 
