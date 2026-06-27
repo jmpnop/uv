@@ -294,7 +294,9 @@ After making changes to the documentation, [format the markdown files](#formatti
 
 ## Development code signing on macOS
 
-Code signing can only be performed by Astral team members.
+This section covers signing a _local test build_ so the macOS keychain approves it across
+recompiles. It is independent of **release** signing, which uses this fork's Developer ID identity
+and is automated in `scripts/publish-release.sh` (see [Releases](#releases)).
 
 Code signing on macOS can improve developer experience when running tests, e.g., when running tests
 that access the macOS keychain, a signed binary can be approved once but an unsigned binary will
@@ -336,21 +338,42 @@ Note `UV_TEST_CODESIGN_IDENTITY` is only supported via `nextest`.
 
 ## Releases
 
-Releases can only be performed by Astral team members.
+> This fork releases locally — there is no GitHub Actions release workflow. The upstream
+> `scripts/release.sh` / `release.yml` flow does not apply here.
 
-Changelog entries and version bumps are automated. First, run:
+The fork ships **macOS-only** binaries (Intel + Apple Silicon) from a maintainer's Mac via
+[`scripts/publish-release.sh`](scripts/publish-release.sh).
+
+### Tagging convention
+
+Releases are tagged `vX.Y.Z-N`, where `X.Y.Z` is the upstream uv version this fork is based on and
+`-N` is the fork build number (a [PEP 440](https://peps.python.org/pep-0440/) post-release, so
+`v0.11.24-2` > `v0.11.24-1` > `v0.11.24`). Bump `-N` whenever you cut a new build of the same
+upstream base — `uv self update` keys off the version, so a same-version re-upload is **not** picked
+up by existing installs.
+
+### Cutting a release
 
 ```shell
-./scripts/release.sh
+# 1. Commit your changes, then tag (annotated):
+git tag -a v0.11.24-4 -m "v0.11.24-4"
+git push fork v0.11.24-4
+
+# 2. Build, sign, notarize, and publish both macOS targets:
+./scripts/publish-release.sh v0.11.24-4
 ```
 
-Then, editorialize the `CHANGELOG.md` file to ensure entries are consistently styled.
+`publish-release.sh` builds each target with `--features self-update`, stamps the tag into the
+binary via `UV_FORK_VERSION`, **signs** `uv`/`uvx` with the Developer ID Application identity
+(hardened runtime + secure timestamp), **notarizes** all targets in a single `notarytool`
+submission, packages tarballs + checksums, and uploads them with `gh release create`. Useful
+environment variables:
 
-Then, open a pull request, e.g., `Bump version to ...`.
+- `DRY_RUN=1` — build + package locally, skip upload and notarization.
+- `SIGN=0` — skip signing and notarization (ships unsigned).
+- `TARGETS="..."` — override the target list.
 
-Binary builds will automatically be tested for the release.
-
-After merging the pull request, run the
-[release workflow](https://github.com/astral-sh/uv/actions/workflows/release.yml) with the version
-tag. **Do not include a leading `v`**. The release will automatically be created on GitHub after
-everything else publishes.
+Signing requires the Developer ID identity and App Store Connect notary key in
+`~/.config/macos-codesign/`; without them the build still succeeds but warns and ships unsigned.
+Because bare CLI binaries cannot have a notarization ticket stapled, notarization is recognized
+online — fine for the `curl | sh` installer, which extracts with `tar` and sets no quarantine.
